@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   const commandArgs = args.slice(1);
 
   // 初始化 SkillRegistry（大多数命令需要）
-  if (command && command !== 'chat' && command !== 'help') {
+  if (command && command !== 'chat' && !command?.startsWith('-') && command !== 'help') {
     await skillRegistry.initialize();
   }
 
@@ -71,17 +71,17 @@ async function main(): Promise<void> {
       await commands.verify(commandArgs);
       break;
 
-    case 'chat':
-      // 启动终端聊天界面
-      const chat = new TerminalChat();
-      await chat.start();
-      break;
-
     case 'help':
     case '--help':
     case '-h':
-    default:
       commands.help();
+      break;
+
+    case 'chat':
+    default:
+      // 默认启动终端聊天界面（核心功能）
+      const terminalChat = new TerminalChat();
+      await terminalChat.start();
       break;
   }
 }
