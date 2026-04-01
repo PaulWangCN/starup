@@ -312,8 +312,15 @@ export class TerminalChat {
     }).start();
 
     try {
-      // 处理消息
-      const result = await this.core.processMessage(this.mainSessionId, message);
+      // 处理消息，支持多轮工具调用
+      const result = await this.core.processMessage(
+        this.mainSessionId, 
+        message,
+        (toolName, toolArgs) => {
+          // 工具调用时更新 spinner 文本
+          spinner.text = `执行: ${toolName}...`;
+        }
+      );
 
       spinner.stop();
 

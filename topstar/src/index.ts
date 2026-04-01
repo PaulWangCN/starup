@@ -89,9 +89,9 @@ export class StarUpCore {
   }
 
   /**
-   * 处理消息
+   * 处理消息 - 支持 ReAct 多轮工具调用
    */
-  async processMessage(sessionId: string, message: string): Promise<string> {
+  async processMessage(sessionId: string, message: string, onToolCall?: (name: string, args: any) => void): Promise<string> {
     const session = this.sessionManager.getSession(sessionId);
     if (!session) {
       throw new Error(`Session ${sessionId} not found`);
@@ -107,14 +107,30 @@ export class StarUpCore {
     // 如果 LLM 服务可用，调用它
     if (this.llmService) {
       const tools = this.toolRegistry.getToolDescriptions();
-      const response = await this.llmService.chat(
-        session.context.messages,
-        tools
-      );
+      const maxIterations = 10; // 防止无限循环
+      let iteration = 0;
+      
+      while (iteration < maxIterations) {
+        iteration++;
+        console.log(`[StarUpCore] ReAct iteration ${iteration}`);
+        
+        const response = await this.llmService.chat(
+          session.context.messages,
+          tools
+        );
 
-      // 处理工具调用
-      if (response.tool_calls && response.tool_calls.length > 0) {
-        // 先把 assistant 的消息（包含 tool_calls）添加到会话
+        // 如果没有工具调用，直接返回结果
+        if (!response.tool_calls || response.tool_calls.length === 0) {
+          // 添加 assistant 的最终回复到会话
+          this.sessionManager.addMessage(sessionId, {
+            role: 'assistant',
+            content: response.content,
+            timestamp: Date.now(),
+          });
+          return response.content;
+        }
+
+        // 有工具调用，先添加 assistant 的消息
         this.sessionManager.addMessage(sessionId, {
           role: 'assistant',
           content: response.content || '',
@@ -122,13 +138,25 @@ export class StarUpCore {
           timestamp: Date.now(),
         });
 
-        // 执行工具调用
+        // 执行所有工具调用
         for (const toolCall of response.tool_calls) {
+          const toolName = toolCall.function.name;
+          const toolArgs = JSON.parse(toolCall.function.arguments);
+          
+          console.log(`[StarUpCore] Tool call: ${toolName}(${JSON.stringify(toolArgs)})`);
+          
+          // 通知外部（用于显示工具调用）
+          if (onToolCall) {
+            onToolCall(toolName, toolArgs);
+          }
+          
           const result = await this.toolRegistry.execute(
-            toolCall.function.name,
-            JSON.parse(toolCall.function.arguments),
+            toolName,
+            toolArgs,
             session
           );
+          
+          console.log(`[StarUpCore] Tool result: ${JSON.stringify(result).substring(0, 200)}`);
           
           // 添加工具结果到会话
           this.sessionManager.addMessage(sessionId, {
@@ -139,30 +167,11 @@ export class StarUpCore {
           });
         }
         
-        // 再次调用获取最终回复
-        const finalResponse = await this.llmService.chat(
-          session.context.messages,
-          tools
-        );
-        
-        // 添加 assistant 的最终回复到会话
-        this.sessionManager.addMessage(sessionId, {
-          role: 'assistant',
-          content: finalResponse.content,
-          timestamp: Date.now(),
-        });
-        
-        return finalResponse.content;
+        // 继续循环，让 AI 观察结果并决定下一步
       }
       
-      // 没有工具调用，直接添加 assistant 回复到会话
-      this.sessionManager.addMessage(sessionId, {
-        role: 'assistant',
-        content: response.content,
-        timestamp: Date.now(),
-      });
-
-      return response.content;
+      // 达到最大迭代次数
+      return '[达到最大迭代次数，请简化您的请求]';
     }
 
     return 'LLM service not configured';
