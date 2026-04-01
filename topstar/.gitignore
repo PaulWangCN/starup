@@ -8,6 +8,9 @@ dist/
 build/
 *.tsbuildinfo
 
+# But keep example skill's dist
+!skills/**/dist/
+
 # Environment variables
 .env
 .env.local
