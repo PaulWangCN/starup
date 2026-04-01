@@ -1,5 +1,6 @@
 /**
  * StarUp 核心类型定义
+ * v1.2: 新增 Skill 生态系统类型
  */
 
 // ==================== 消息类型 ====================
@@ -120,7 +121,7 @@ export interface ToolResult {
   error?: string;
 }
 
-// ==================== Skill 类型 ====================
+// ==================== Skill v1.1 类型（兼容） ====================
 
 export interface SkillMetadata {
   name: string;
@@ -145,6 +146,195 @@ export interface Skill {
   path: string;                // Skill 目录路径
   scripts?: Map<string, string>;
   resources?: Map<string, string>;
+}
+
+// ==================== Skill v1.2 新类型 ====================
+
+// Skill 运行时类型
+export type SkillRuntimeType = 'javascript' | 'python' | 'wasm';
+
+// Skill 状态
+export type SkillStatus = 'installed' | 'active' | 'disabled' | 'unloaded' | 'error' | 'upgrading';
+
+// 权限范围
+export interface NetworkPermissionScope {
+  allow: string[];
+  deny: string[];
+}
+
+export interface MemoryPermissionScope {
+  scope: string[];
+  retention?: string;          // 如 "7d", "24h"
+  limit?: number;
+}
+
+// 权限声明
+export interface Permission {
+  id: string;
+  scope: string[] | NetworkPermissionScope | MemoryPermissionScope;
+}
+
+// 依赖声明
+export interface Dependency {
+  id: string;
+  version: string;             // semver 范围
+  optional?: boolean;
+  registry?: string;           // 私有源
+}
+
+// 运行时配置
+export interface RuntimeConfig {
+  type: SkillRuntimeType;
+  entry: string;
+  compatible_with?: string[];  // 如 ["node18", "bun1.0"]
+}
+
+// 集成配置
+export interface IntentIntegration {
+  model: 'light' | 'standard' | 'heavy';
+  examples: string[];
+}
+
+export interface ContextIntegration {
+  retention_turns: number;
+}
+
+export interface IntegrationsConfig {
+  intent_recognition?: IntentIntegration;
+  context?: ContextIntegration;
+}
+
+// 资源限制
+export interface ResourceLimits {
+  max_memory?: string;         // 如 "128mb"
+  timeout_ms?: number;
+  max_cpu_percent?: number;
+}
+
+// manifest.yaml 结构
+export interface SkillManifest {
+  id: string;                  // 反向域名格式
+  name: string;
+  version: string;             // semver
+  api_version: string;         // 如 "1.2"
+  author: string;
+  license: string;
+  description: string;
+  homepage?: string;
+  
+  runtime: RuntimeConfig;
+  permissions: Permission[];
+  dependencies?: Dependency[];
+  integrations?: IntegrationsConfig;
+  resources?: ResourceLimits;
+}
+
+// Skill 包（v1.2）
+export interface SkillPackage {
+  manifest: SkillManifest;
+  path: string;                // 安装路径
+  content?: string;            // SKILL.md/PROMPT.md 内容
+  assets?: Map<string, string>;
+  schemas?: Map<string, any>;
+  status: SkillStatus;
+  installedAt: number;
+  updatedAt: number;
+}
+
+// 安装规范
+export interface InstallSpec {
+  source: 'marketplace' | 'git' | 'local' | 'url';
+  id?: string;                 // marketplace id
+  version?: string;            // semver 范围
+  url?: string;                // git/url source
+  path?: string;               // local path
+  registry?: string;           // 指定 registry
+}
+
+export interface InstallOptions {
+  force?: boolean;             // 强制重新安装
+  link?: boolean;              // 开发模式软链接
+  offline?: boolean;           // 离线模式
+  verify?: boolean;            // 验证签名
+}
+
+export interface InstallResult {
+  success: boolean;
+  skillId?: string;
+  version?: string;
+  message: string;
+  dependencies?: Dependency[];
+  error?: string;
+}
+
+// 依赖树
+export interface DependencyNode {
+  id: string;
+  version: string;
+  resolved: boolean;
+  children: DependencyNode[];
+}
+
+export interface VersionConflict {
+  skill_id: string;
+  required_by: string[];
+  candidates: string[];
+  resolution: 'upgrade' | 'downgrade' | 'isolate' | 'fail';
+}
+
+export interface DependencyTree {
+  root: DependencyNode;
+  conflicts: VersionConflict[];
+  install_order: SkillPackage[];
+}
+
+export interface ResolutionConstraints {
+  strategies: {
+    upgrade: 'auto' | 'prompt' | 'reject';
+    multi_version: boolean;
+    cycle_detection: 'error' | 'warn' | 'allow';
+  };
+}
+
+// Skill 运行时实例
+export interface SkillInstance {
+  id: string;
+  package: SkillPackage;
+  vm?: VMInstance;
+  tools: ToolDefinition[];
+  status: SkillStatus;
+}
+
+export interface VMInstance {
+  id: string;
+  type: SkillRuntimeType;
+  sandbox: SandboxConfig;
+  memory: number;
+  cpu: number;
+}
+
+export interface SandboxConfig {
+  permissions: Permission[];
+  skillPath: string;
+  homePath: string;
+  tempPath: string;
+}
+
+// 升级结果
+export interface UpgradeResult {
+  success: boolean;
+  oldVersion: string;
+  newVersion: string;
+  downtime_ms: number;
+  rollbackAvailable: boolean;
+}
+
+// Prompt 片段（L5 层注入）
+export interface PromptFragment {
+  section: 'skills';           // 固定为 skills
+  content: string;             // Markdown 格式
+  trigger_patterns: string[];  // 触发正则/关键词
+  context_window: number;
 }
 
 // ==================== Channel 类型 ====================
@@ -205,6 +395,27 @@ export interface LLMConfig {
 
 // ==================== 系统配置 ====================
 
+export interface RegistryConfig {
+  name: string;
+  url: string;
+  priority: number;
+  auth?: {
+    type: 'token' | 'oauth';
+    token?: string;
+    client_id?: string;
+  };
+}
+
+export interface SecurityConfig {
+  allowed_registries?: string[];
+  require_signature?: boolean;
+  permission_policy?: {
+    deny_permissions?: string[];
+    require_approval?: string[];
+    max_network_domains?: number;
+  };
+}
+
 export interface SystemConfig {
   llm: LLMConfig;
   channels: ChannelConfig[];
@@ -218,4 +429,47 @@ export interface SystemConfig {
     enabled: boolean;
     timeout: number;
   };
+  // v1.2 新增
+  registries?: RegistryConfig[];
+  install?: {
+    default_registry: string;
+    auto_update: boolean;
+    verify_signature: boolean;
+  };
+  dependency?: {
+    resolution: 'auto' | 'conservative' | 'latest';
+    allow_multi_version: boolean;
+    cache_ttl: string;
+  };
+  security?: SecurityConfig;
+}
+
+// ==================== 错误类型 ====================
+
+export class SkillError extends Error {
+  constructor(message: string, public code: string) {
+    super(message);
+    this.name = 'SkillError';
+  }
+}
+
+export class CapabilityError extends SkillError {
+  constructor(message: string, public permission: string) {
+    super(message, 'CAPABILITY_ERROR');
+    this.name = 'CapabilityError';
+  }
+}
+
+export class DependencyError extends SkillError {
+  constructor(message: string, public conflicts: VersionConflict[]) {
+    super(message, 'DEPENDENCY_ERROR');
+    this.name = 'DependencyError';
+  }
+}
+
+export class InstallError extends SkillError {
+  constructor(message: string, public phase: string) {
+    super(message, 'INSTALL_ERROR');
+    this.name = 'InstallError';
+  }
 }

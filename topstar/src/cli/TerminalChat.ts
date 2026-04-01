@@ -1,8 +1,9 @@
 import * as readline from 'readline';
-import { Renderer } from './Renderer';
-import { CommandManager } from './commands';
-import { StarUpCore } from '../index';
+import chalk from 'chalk';
 import ora from 'ora';
+import { Renderer } from './Renderer';
+import { commands } from './commands';
+import { StarUpCore } from '../index';
 
 /**
  * 终端聊天界面
@@ -11,15 +12,13 @@ import ora from 'ora';
 export class TerminalChat {
   private core: StarUpCore;
   private renderer: Renderer;
-  private commands: CommandManager;
   private rl: readline.Interface | null = null;
   private running: boolean = false;
   private mainSessionId: string | null = null;
 
-  constructor(core: StarUpCore) {
-    this.core = core;
+  constructor(core?: StarUpCore) {
+    this.core = core || new StarUpCore();
     this.renderer = new Renderer();
-    this.commands = new CommandManager(core, this.renderer);
   }
 
   /**
@@ -29,16 +28,14 @@ export class TerminalChat {
     // 初始化核心
     await this.core.initialize();
 
-    // 获取主会话
-    const mainSession = this.core.getSessionManager().getMainSession();
-    if (!mainSession) {
-      throw new Error('Failed to initialize main session');
-    }
+    // 初始化主会话
+    const mainSession = this.core.sessionManager.initializeMainSession();
     this.mainSessionId = mainSession.id;
 
     // 显示欢迎界面
     this.renderer.showWelcome();
-    this.renderer.system(`已加载 ${this.core.getStatus().skills} 个 Skills, ${this.core.getStatus().tools} 个工具`);
+    const status = this.core.getStatus();
+    this.renderer.system(`已加载 ${status.skills} 个 Skills, ${status.tools} 个工具`);
     this.renderer.system(`会话: ${mainSession.id.substring(0, 8)}... 已初始化`);
     this.renderer.separator();
 
@@ -100,8 +97,8 @@ export class TerminalChat {
     }
 
     // 检查是否是命令
-    if (this.commands.isCommand(trimmed)) {
-      const shouldContinue = await this.commands.execute(trimmed);
+    if (trimmed.startsWith('/')) {
+      const shouldContinue = await this.handleCommand(trimmed);
       if (!shouldContinue) {
         this.stop();
       }
@@ -110,6 +107,41 @@ export class TerminalChat {
 
     // 处理消息（用户输入已由 readline 显示）
     await this.processMessage(trimmed);
+  }
+
+  /**
+   * 处理命令
+   */
+  private async handleCommand(input: string): Promise<boolean> {
+    const parts = input.slice(1).split(' ');
+    const cmd = parts[0];
+    const args = parts.slice(1);
+
+    switch (cmd) {
+      case 'exit':
+      case 'quit':
+        return false;
+
+      case 'help':
+        this.showHelp();
+        return true;
+
+      case 'status':
+        this.showStatus();
+        return true;
+
+      case 'skills':
+        await commands.list(['--verbose']);
+        return true;
+
+      case 'tools':
+        this.showTools();
+        return true;
+
+      default:
+        this.renderer.error(`未知命令: ${cmd}`);
+        return true;
+    }
   }
 
   /**
@@ -128,11 +160,11 @@ export class TerminalChat {
     }).start();
 
     try {
-      // 处理消息（带工具调用拦截）
-      const result = await this.processMessageWithTools(message);
-      
+      // 处理消息
+      const result = await this.core.processMessage(this.mainSessionId, message);
+
       spinner.stop();
-      
+
       // 显示 AI 回复
       this.renderer.ai(result);
     } catch (error) {
@@ -142,35 +174,53 @@ export class TerminalChat {
   }
 
   /**
-   * 处理消息并拦截工具调用
+   * 显示帮助
    */
-  private async processMessageWithTools(message: string): Promise<string> {
-    if (!this.mainSessionId) {
-      throw new Error('Session not initialized');
+  private showHelp(): void {
+    console.log(`
+可用命令:
+  /exit, /quit    退出程序
+  /help           显示帮助
+  /status         显示系统状态
+  /skills         列出已加载的 Skills
+  /tools          列出可用工具
+
+直接输入消息与 AI 对话。
+`);
+  }
+
+  /**
+   * 显示系统状态
+   */
+  private showStatus(): void {
+    const status = this.core.getStatus();
+    const stats = this.core.sessionManager.getStats();
+
+    console.log(`
+系统状态:
+  Skills: ${status.skills}
+  工具: ${status.tools}
+  会话: ${stats.total} (活跃: ${stats.active}, 子代理: ${stats.subAgents})
+`);
+  }
+
+  /**
+   * 显示工具列表
+   */
+  private showTools(): void {
+    const tools = this.core.toolRegistry.getAll();
+    console.log('\n可用工具:');
+    for (const tool of tools) {
+      console.log(`  - ${tool.name}: ${tool.description}`);
     }
-
-    const session = this.core.getSessionManager().getSession(this.mainSessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-
-    // 添加用户消息
-    this.core.getSessionManager().addMessage(this.mainSessionId, {
-      role: 'user',
-      content: message,
-      timestamp: Date.now(),
-    });
-
-    // 这里需要访问 LLMService，但由于它是私有的，我们需要通过 processMessage 来处理
-    // 暂时使用核心 processMessage 方法
-    return await this.core.processMessage(this.mainSessionId, message);
+    console.log();
   }
 
   /**
    * 自动补全
    */
   private completer(line: string): [string[], string] {
-    const completions = this.commands.getCommandList().map((c) => `/${c}`);
+    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools'];
     const hits = completions.filter((c) => c.startsWith(line));
     return [hits.length ? hits : completions, line];
   }
@@ -184,6 +234,3 @@ export class TerminalChat {
     }
   }
 }
-
-// 导入 chalk 用于 prompt
-import chalk from 'chalk';
