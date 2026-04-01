@@ -49,7 +49,7 @@ export class SessionManager {
         dailyLog: this.getDailyLogPath(),
         longTerm: 'MEMORY.md',
       },
-      allowedTools: ['read', 'write', 'edit', 'exec', 'web_search', 'install_skill'],
+      allowedTools: ['read', 'write', 'edit', 'exec', 'web_search'],
       memoryAccess: 'write',
       timeout: 300,
       callbackToParent: false,

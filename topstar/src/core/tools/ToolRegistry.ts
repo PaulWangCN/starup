@@ -3,7 +3,6 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { metaInstallerSkill } from '../skills/MetaInstallerSkill';
 
 const execAsync = promisify(exec);
 
@@ -246,32 +245,7 @@ export class ToolRegistry {
       },
     });
 
-    // install_skill: 安装 Skill
-    this.register({
-      name: 'install_skill',
-      description: `安装 Skill 来扩展系统功能。直接调用，传入 skill_name 即可。`,
-      parameters: [
-        { name: 'skill_name', type: 'string', description: 'Skill 名称或 ID，如 "web_search", "weather", "translator"', required: true },
-        { name: 'version', type: 'string', description: '版本号，如 "1.0.0"，不指定则安装最新版', required: false },
-      ],
-      handler: async (args, session) => {
-        try {
-          const result = await metaInstallerSkill.install(
-            { skill_hint: args.skill_name, version: args.version },
-            { session, recentMessages: [], userPreferences: {} }
-          );
-          return {
-            success: result.success,
-            data: result.data,
-            message: result.message,
-            requires_confirmation: result.requires_confirmation,
-            error: result.success ? undefined : result.message,
-          };
-        } catch (error) {
-          return { success: false, error: `安装失败: ${error instanceof Error ? error.message : String(error)}` };
-        }
-      },
-    });
+
   }
 
   private convertParameters(parameters: any[]): Record<string, any> {

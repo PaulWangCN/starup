@@ -1,8 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import YAML from 'yaml';
-import { Skill, SkillPackage, SkillManifest, InstallResult } from '../../types';
-import { installManager } from './InstallManager';
+import { Skill, SkillPackage, SkillManifest } from '../../types';
 
 /**
  * Skill 注册表（简化版）
@@ -40,7 +39,6 @@ export class SkillRegistry {
    * 初始化：加载内置 skills 和用户 skills
    */
   async initialize(): Promise<void> {
-    await installManager.initialize();
     // 加载内置 skills（直接嵌入提示词）
     await this.loadBuiltinSkills();
     // 加载用户 skills（写入索引文件）
@@ -79,12 +77,6 @@ export class SkillRegistry {
 
     // 扫描用户目录
     await this.scanDirectory(this.userSkillsDir, this.userSkills);
-    // 同步 InstallManager 的已安装列表
-    for (const pkg of installManager.list()) {
-      if (!this.packages.has(pkg.manifest.id)) {
-        this.packages.set(pkg.manifest.id, pkg);
-      }
-    }
 
     await this.writeSkillsIndex();
   }
@@ -262,29 +254,7 @@ export class SkillRegistry {
     await fs.writeFile(this.skillsIndexPath, lines.join('\n'), 'utf-8');
   }
 
-  /**
-   * 安装 skill
-   */
-  async install(spec: any, options?: any): Promise<InstallResult> {
-    const result = await installManager.install(spec, options);
-    if (result.success) {
-      await this.rescan();
-    }
-    return result;
-  }
 
-  /**
-   * 卸载 skill
-   */
-  async uninstall(skillId: string, options?: { purgeData?: boolean }): Promise<boolean> {
-    const result = await installManager.uninstall(skillId, options);
-    if (result) {
-      this.userSkills.delete(skillId);
-      this.packages.delete(skillId);
-      await this.rescan();
-    }
-    return result;
-  }
 
   /**
    * 获取 skill
@@ -297,7 +267,7 @@ export class SkillRegistry {
    * 获取 package
    */
   getPackage(id: string): SkillPackage | undefined {
-    return this.packages.get(id) || installManager.get(id);
+    return this.packages.get(id);
   }
 
   /**
@@ -334,12 +304,7 @@ export class SkillRegistry {
     }));
   }
 
-  /**
-   * 升级 skill（兼容旧接口）
-   */
-  async upgrade(skillId: string, toVersion: string): Promise<any> {
-    return installManager.upgrade(skillId, toVersion);
-  }
+
 
   /**
    * 获取依赖树（兼容旧接口）

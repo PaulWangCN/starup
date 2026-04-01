@@ -7,7 +7,6 @@ import { SessionManager, sessionManager } from './core/session/SessionManager';
 import { MemoryManager, memoryManager } from './core/memory/MemoryManager';
 import { ToolRegistry, toolRegistry } from './core/tools/ToolRegistry';
 import { skillRegistry } from './core/skills/SkillRegistry';
-import { metaClawhubSkill } from './core/skills/MetaClawhubSkill';
 import { LLMService } from './core/llm/LLMService';
 import { SystemConfig } from './types';
 
@@ -70,7 +69,6 @@ export class StarUpCore {
   async initialize(): Promise<void> {
     console.log('[StarUpCore] Initializing...');
     await this.skillRegistry.initialize();
-    await metaClawhubSkill.initialize();
     console.log('[StarUpCore] Initialization complete');
   }
 

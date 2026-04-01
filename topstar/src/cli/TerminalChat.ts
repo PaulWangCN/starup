@@ -2,7 +2,6 @@ import * as readline from 'readline';
 import chalk from 'chalk';
 import ora from 'ora';
 import { Renderer } from './Renderer';
-import { commands } from './commands';
 import { StarUpCore } from '../index';
 import { PromptAssembler, createDefaultConfig, RuntimeContext } from '../core/prompt/PromptAssembler';
 import * as fs from 'fs/promises';
@@ -326,7 +325,7 @@ export class TerminalChat {
         return true;
 
       case 'skills':
-        await commands.list(['--verbose']);
+        console.log('ℹ️ Skills are auto-loaded from topstar/skills/ and ~/.starup/skills/');
         return true;
 
       case 'tools':
