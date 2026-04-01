@@ -126,9 +126,8 @@ export class PromptAssembler {
   }
 
   private getAgentPath(agentId: string): string {
-    const homeDir = process.env.HOME || process.env.USERPROFILE || '.';
-    const agentPath = path.join(homeDir, '.starup');
-    console.log(`[PromptAssembler] Agent path: ${agentPath} (HOME=${process.env.HOME}, USERPROFILE=${process.env.USERPROFILE})`);
+    const agentPath = path.join(process.cwd(), '.starup');
+    console.log(`[PromptAssembler] Agent path: ${agentPath} (cwd=${process.cwd()})`);
     return agentPath;
   }
 
@@ -253,7 +252,7 @@ export class PromptAssembler {
     }
 
     // 2. 用户安装的 skills（从索引文件读取）
-    const indexPath = path.join(process.env.HOME || '.', '.starup', 'skills_index.md');
+    const indexPath = path.join(process.cwd(), '.starup', 'skills_index.md');
     try {
       let userContent = await fs.readFile(indexPath, 'utf-8');
       // 防止过长导致上下文膨胀

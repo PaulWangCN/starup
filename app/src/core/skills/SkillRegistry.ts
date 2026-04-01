@@ -8,7 +8,7 @@ import { Skill, SkillPackage, SkillManifest } from '../../types';
  *
  * 设计理念：
  * 1. 内置 skills：放在项目 skills/ 目录，系统启动时直接读取 SKILL.md 嵌入提示词
- * 2. 用户 skills：放在 ~/.starup/skills/，扫描后写入 skills_index.md 作为扩展能力
+ * 2. 用户 skills：放在 ./.starup/skills/，扫描后写入 skills_index.md 作为扩展能力
  * 3. 大模型根据 SKILL.md 的 description 自行判断何时使用
  */
 export class SkillRegistry {
@@ -31,8 +31,8 @@ export class SkillRegistry {
     } else {
       this.builtinSkillsDir = path.join(__dirname, '../../../skills');
     }
-    this.userSkillsDir = path.join(process.env.HOME || '.', '.starup', 'skills');
-    this.skillsIndexPath = path.join(process.env.HOME || '.', '.starup', 'skills_index.md');
+    this.userSkillsDir = path.join(process.cwd(), '.starup', 'skills');
+    this.skillsIndexPath = path.join(process.cwd(), '.starup', 'skills_index.md');
   }
 
   /**

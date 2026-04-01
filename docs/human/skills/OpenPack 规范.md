@@ -146,7 +146,7 @@ permissions:
 
 模板变量：
 - `${SKILL_PATH}`: Skill 安装目录
-- `${SKILL_HOME}`: Skill 数据目录 (~/.starup/skills/{id}/)
+- `${SKILL_HOME}`: Skill 数据目录 (./.starup/skills/{id}/)
 - `${SHARED_TEMP}`: 共享临时目录
 
 #### 依赖声明

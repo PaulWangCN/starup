@@ -200,7 +200,7 @@ tools:
 
 放在以下位置之一：
 - `skills/my-skill/` (项目内置)
-- `~/.starup/skills/my-skill/` (用户目录)
+- `./.starup/skills/my-skill/` (本地目录)
 
 ## 开发计划
 

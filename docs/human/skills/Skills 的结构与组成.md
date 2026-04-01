@@ -152,7 +152,7 @@ Skill 不是一次性工作。根据使用反馈（如"为什么这个 Skill 没
 将 Skill 文件夹放置在以下任一位置：
 
 ```
-~/.claude/skills/my-skill/SKILL.md      # 全局 Skill
+./.claude/skills/my-skill/SKILL.md      # 全局 Skill
 ./skills/my-skill/SKILL.md              # 项目级 Skill
 ```
 

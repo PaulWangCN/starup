@@ -53,12 +53,11 @@ export class SessionSnapshotManager {
 
   /**
    * 构造函数
-   * @param snapshotDir 快照存储目录，默认为 ~/.starup/snapshots/
+   * @param snapshotDir 快照存储目录，默认为 ./.starup/snapshots/
    */
   constructor(snapshotDir?: string) {
-    // 默认使用用户主目录下的 .starup/snapshots
-    const homeDir = process.env.USERPROFILE || process.env.HOME || '.';
-    this.snapshotDir = snapshotDir || path.join(homeDir, '.starup', 'snapshots');
+    // 默认使用当前目录下的 .starup/snapshots
+    this.snapshotDir = snapshotDir || path.join(process.cwd(), '.starup', 'snapshots');
     
     // 确保目录存在
     this.ensureDirectoryExists();

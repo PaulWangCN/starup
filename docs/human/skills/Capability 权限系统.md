@@ -90,9 +90,9 @@ permissions:
 
 | 变量 | 说明 | 示例值 |
 |------|------|--------|
-| `${SKILL_PATH}` | Skill 安装目录 | `~/.starup/skills/weather-query/` |
-| `${SKILL_HOME}` | Skill 数据目录 | `~/.starup/skills/weather-query/data/` |
-| `${SHARED_TEMP}` | 共享临时目录 | `~/.starup/temp/` |
+| `${SKILL_PATH}` | Skill 安装目录 | `./.starup/skills/weather-query/` |
+| `${SKILL_HOME}` | Skill 数据目录 | `./.starup/skills/weather-query/data/` |
+| `${SHARED_TEMP}` | 共享临时目录 | `./.starup/temp/` |
 
 ### 2.3 记忆权限 (memory)
 
@@ -337,7 +337,7 @@ claw list --permissions
 3. **审计日志**: 定期检查权限变更记录
 
 ```yaml
-# ~/.starup/config.yaml
+# ./.starup/config.yaml
 security:
   allowed_registries:
     - "https://marketplace.company.com"
@@ -353,7 +353,7 @@ security:
 
 ### 6.1 日志记录
 
-所有权限操作记录在 `~/.starup/logs/capability.log`：
+所有权限操作记录在 `./.starup/logs/capability.log`：
 
 ```json
 {

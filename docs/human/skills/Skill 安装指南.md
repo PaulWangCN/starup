@@ -257,7 +257,7 @@ claw test my-skill --debug
 
 ### 6.1 用户配置
 
-`~/.starup/config.yaml`：
+`./.starup/config.yaml`：
 
 ```yaml
 # Registry 配置
@@ -363,7 +363,7 @@ claw prune
 配置企业内部 Registry：
 
 ```yaml
-# ~/.starup/config.yaml
+# ./.starup/config.yaml
 registries:
   - name: "enterprise"
     url: "https://skills.company.com"

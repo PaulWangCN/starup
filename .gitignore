@@ -28,12 +28,7 @@ yarn-error.log*
 .env.*.local
 
 # AI generated files (should not be committed)
-app/AGENTS.md
-app/SOUL.md
-app/IDENTITY.md
-app/USER.md
-app/MEMORY.md
-app/BOOTSTRAP.md
+app/.starup/*
 
 # OS
 .DS_Store

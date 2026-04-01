@@ -26,7 +26,7 @@ StarUp v1.1 引入了六层 Prompt 架构，实现从"功能可用"到"智能可
 
 **用途**: 定义 AI 的核心人格、价值观和行为准则
 
-**文件位置**: `~/.starup/agents/{agent_id}/SOUL.md`
+**文件位置**: `./.starup/agents/{agent_id}/SOUL.md`
 
 **更新策略**: 只读，修改后需重启生效
 
@@ -55,7 +55,7 @@ StarUp v1.1 引入了六层 Prompt 架构，实现从"功能可用"到"智能可
 
 **用途**: 定义 AI 的名称、表情符号、版本等标识信息
 
-**文件位置**: `~/.starup/agents/{agent_id}/IDENTITY.md`
+**文件位置**: `./.starup/agents/{agent_id}/IDENTITY.md`
 
 **更新策略**: 支持热更新，可实时修改
 
@@ -85,7 +85,7 @@ greeting_style: "adaptive"  # adaptive/time_based/fixed
 
 **用途**: 存储用户偏好、历史记忆摘要
 
-**文件位置**: `~/.starup/agents/{agent_id}/USER.md`
+**文件位置**: `./.starup/agents/{agent_id}/USER.md`
 
 **更新策略**: 实时更新，可运行时修改
 
@@ -215,11 +215,11 @@ last_updated: "2026-04-01T10:00:00Z"
 ```
 会话启动/重置
     ↓
-读取 ~/.starup/agents/{agent_id}/SOUL.md (L1)
-读取 ~/.starup/agents/{agent_id}/IDENTITY.md (L2)
-读取 ~/.starup/agents/{agent_id}/USER.md (L3)
+读取 ./.starup/agents/{agent_id}/SOUL.md (L1)
+读取 ./.starup/agents/{agent_id}/IDENTITY.md (L2)
+读取 ./.starup/agents/{agent_id}/USER.md (L3)
     ↓
-扫描 ~/.starup/skills/*/SKILL.md 生成 L5
+扫描 ./.starup/skills/*/SKILL.md 生成 L5
     ↓
 合并系统工具定义生成 L4
     ↓

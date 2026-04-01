@@ -128,7 +128,7 @@ export class TerminalChat {
    * 当 PromptAssembler 失败时使用极简提示词
    */
   private getDefaultSystemPrompt(): string {
-    return '你是 StarUp，一个专业的 AI 助手。请检查 ~/.starup/ 目录下的配置文件。';
+    return '你是 StarUp，一个专业的 AI 助手。请检查 ./.starup/ 目录下的配置文件。';
   }
 
   /**
@@ -188,7 +188,7 @@ export class TerminalChat {
         return true;
 
       case 'skills':
-        console.log('ℹ️ Skills are auto-loaded from app/skills/ and ~/.starup/skills/');
+        console.log('ℹ️ Skills are auto-loaded from app/skills/ and ./.starup/skills/');
         return true;
 
       case 'tools':

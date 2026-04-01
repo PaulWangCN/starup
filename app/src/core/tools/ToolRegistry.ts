@@ -100,7 +100,8 @@ export class ToolRegistry {
       ],
       handler: async (args) => {
         const filePath = path.resolve(this.workingDir, args.path);
-        if (!filePath.startsWith(this.workingDir) && !filePath.startsWith(process.env.HOME || '')) {
+        const localStarupDir = path.join(this.workingDir, '.starup');
+        if (!filePath.startsWith(this.workingDir) && !filePath.startsWith(localStarupDir)) {
           return { success: false, error: 'Access denied: path outside allowed directories' };
         }
         try {
@@ -130,7 +131,8 @@ export class ToolRegistry {
       ],
       handler: async (args) => {
         const filePath = path.resolve(this.workingDir, args.path);
-        if (!filePath.startsWith(this.workingDir) && !filePath.startsWith(process.env.HOME || '')) {
+        const localStarupDir = path.join(this.workingDir, '.starup');
+        if (!filePath.startsWith(this.workingDir) && !filePath.startsWith(localStarupDir)) {
           return { success: false, error: 'Access denied: path outside allowed directories' };
         }
         try {

@@ -116,8 +116,8 @@ export class StarUpCore {
       return;
     }
 
-    const homeDir = process.env.HOME || process.env.USERPROFILE || '.';
-    const heartbeatPath = path.join(homeDir, '.starup', 'HEARTBEAT.md');
+    const localDir = path.join(process.cwd(), '.starup');
+    const heartbeatPath = path.join(localDir, 'HEARTBEAT.md');
 
     let heartbeatContent: string;
     try {
@@ -172,12 +172,11 @@ export class StarUpCore {
 
   /**
    * 确保配置文件存在
-   * 检查 ~/.starup/ 目录下的 AGENTS.md、SOUL.md、IDENTITY.md、USER.md
+   * 检查 ./.starup/ 目录下的 AGENTS.md、SOUL.md、IDENTITY.md、USER.md
    * 如果不存在，从模板复制
    */
   private async ensureConfigFiles(): Promise<void> {
-    const homeDir = process.env.HOME || process.env.USERPROFILE || '.';
-    const agentPath = path.join(homeDir, '.starup');
+    const agentPath = path.join(process.cwd(), '.starup');
     
     // 模板目录位置 - 尝试多个可能的位置
     // 开发环境: __dirname = app/src/
