@@ -1,0 +1,4 @@
+# Heartbeat checklist
+
+- 查看接下来2小时的日历事件
+- 其他一切正常就回复 HEARTBEAT_OK

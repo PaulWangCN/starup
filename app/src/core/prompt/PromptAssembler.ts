@@ -25,6 +25,7 @@ export interface RuntimeContext {
 export interface PromptLayerConfig {
   version: string;
   layers: {
+    agents: { path: string; readonly: boolean; };
     soul: { path: string; hash: string; readonly: boolean; };
     identity: { path: string; cache_ttl: number; };
     user_profile: { path: string; auto_update: boolean; };
@@ -69,12 +70,20 @@ export class PromptAssembler {
   }
 
   /**
-   * 组装完整的六层Prompt
+   * 组装完整的七层Prompt
+   * L0: AGENTS.md - 工作区指南
+   * L1: SOUL.md - 灵魂/人格
+   * L2: IDENTITY.md - 身份标识
+   * L3: USER.md - 用户画像
+   * L4: TOOLS - 可用工具
+   * L5: SKILLS - 技能能力
+   * L6: RUNTIME_CONTEXT - 运行时上下文
    */
   async assemble(agentId: string, runtimeContext: RuntimeContext): Promise<AssembledPrompt> {
     const agentPath = this.getAgentPath(agentId);
 
-    const [layer1, layer2, layer3] = await Promise.all([
+    const [layer0, layer1, layer2, layer3] = await Promise.all([
+      this.loadLayer0(agentPath),
       this.loadLayer1(agentPath),
       this.loadLayer2(agentPath),
       this.loadLayer3(agentPath),
@@ -85,6 +94,7 @@ export class PromptAssembler {
     const layer6 = this.generateLayer6(runtimeContext);
 
     const content = this.combineLayers([
+      { name: 'L0_AGENTS', content: layer0, required: true },
       { name: 'L1_SOUL', content: layer1, required: true },
       { name: 'L2_IDENTITY', content: layer2, required: true },
       { name: 'L3_USER_PROFILE', content: layer3, required: false },
@@ -98,6 +108,7 @@ export class PromptAssembler {
       content,
       tokenCount: this.estimateTokens(content),
       layers: {
+        L0_AGENTS: !!layer0,
         L1_SOUL: !!layer1,
         L2_IDENTITY: !!layer2,
         L3_USER_PROFILE: !!layer3,
@@ -117,6 +128,23 @@ export class PromptAssembler {
   private getAgentPath(agentId: string): string {
     const homeDir = process.env.HOME || process.env.USERPROFILE || '.';
     return path.join(homeDir, '.starup');
+  }
+
+  /**
+   * L0: AGENTS.md - 工作区指南
+   * 包含系统性行为准则、红线、工作模式等
+   */
+  private async loadLayer0(agentPath: string): Promise<string> {
+    const agentsPath = path.join(agentPath, 'AGENTS.md');
+    try {
+      const cached = this.cache.get('agents');
+      if (cached && this.config.layers.agents.readonly) return cached.content;
+      const content = await fs.readFile(agentsPath, 'utf-8');
+      this.cache.set('agents', { content, timestamp: Date.now() });
+      return this.wrapLayer('AGENTS', content);
+    } catch {
+      return this.wrapLayer('AGENTS', this.getDefaultAgents());
+    }
   }
 
   private async loadLayer1(agentPath: string): Promise<string> {
@@ -378,23 +406,16 @@ export class PromptAssembler {
     return result;
   }
 
+  private getDefaultAgents(): string {
+    return '<!-- AGENTS.md 未找到，请确保 ~/.starup/AGENTS.md 存在 -->';
+  }
+
   private getDefaultSoul(): string {
-    return '[SOUL] 等待初始化 - 请检查 ~/.starup/agents/default/SOUL.md';
+    return '<!-- SOUL.md 未找到，请确保 ~/.starup/SOUL.md 存在 -->';
   }
 
   private getDefaultIdentity(): string {
-    return [
-      '# 身份标识',
-      '',
-      '- 名称: StarUp',
-      '- 表情符号: ⭐',
-      '- 版本: 1.0.0',
-      '',
-      '## 性格特点',
-      '- 友好且专业',
-      '- 乐于学习和探索',
-      '- 注重效率和结果',
-    ].join('\n');
+    return '<!-- IDENTITY.md 未找到，请确保 ~/.starup/IDENTITY.md 存在 -->';
   }
 
   clearCache(): void {
@@ -408,8 +429,9 @@ export class PromptAssembler {
 
 export function createDefaultConfig(): PromptLayerConfig {
   return {
-    version: '1.3-simple',
+    version: '1.4-simple',
     layers: {
+      agents: { path: 'AGENTS.md', readonly: true },
       soul: { path: 'SOUL.md', hash: '', readonly: true },
       identity: { path: 'IDENTITY.md', cache_ttl: 60 },
       user_profile: { path: 'USER.md', auto_update: true },

@@ -3,6 +3,8 @@
  * v1.3-simple: 大道至简版
  */
 
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import { SessionManager, sessionManager } from './core/session/SessionManager';
 import { MemoryManager, memoryManager } from './core/memory/MemoryManager';
 import { ToolRegistry, toolRegistry } from './core/tools/ToolRegistry';
@@ -68,8 +70,90 @@ export class StarUpCore {
    */
   async initialize(): Promise<void> {
     console.log('[StarUpCore] Initializing...');
+    
+    // 确保配置文件存在
+    await this.ensureConfigFiles();
+    
     await this.skillRegistry.initialize();
     console.log('[StarUpCore] Initialization complete');
+  }
+
+  /**
+   * 确保配置文件存在
+   * 检查 ~/.starup/ 目录下的 AGENTS.md、SOUL.md、IDENTITY.md、USER.md
+   * 如果不存在，从模板复制
+   */
+  private async ensureConfigFiles(): Promise<void> {
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '.';
+    const agentPath = path.join(homeDir, '.starup');
+    
+    // 模板目录位置 - 尝试多个可能的位置
+    // 开发环境: __dirname = app/src/
+    // 编译环境: __dirname = app/dist/ 或 app/dist/core/
+    const possibleTemplateDirs = [
+      // 开发环境：index.ts 在 app/src/
+      path.join(__dirname, 'core', 'prompt', 'templates'),
+      // 编译环境：相对于项目根目录
+      path.join(process.cwd(), 'app', 'src', 'core', 'prompt', 'templates'),
+      // 其他可能位置
+      path.join(__dirname, '..', 'src', 'core', 'prompt', 'templates'),
+      path.join(__dirname, '..', '..', 'src', 'core', 'prompt', 'templates'),
+    ];
+    
+    console.log(`[StarUpCore] Config path: ${agentPath}`);
+    console.log(`[StarUpCore] Possible template paths:`, possibleTemplateDirs);
+    
+    // 找到实际存在的模板目录
+    let templatesDir: string | null = null;
+    for (const dir of possibleTemplateDirs) {
+      try {
+        await fs.access(dir);
+        templatesDir = dir;
+        console.log(`[StarUpCore] Using templates from: ${templatesDir}`);
+        break;
+      } catch {
+        // 目录不存在，继续尝试下一个
+      }
+    }
+    
+    if (!templatesDir) {
+      console.error('[StarUpCore] Could not find templates directory. Searched:', possibleTemplateDirs);
+      return;
+    }
+    
+    try {
+      await fs.mkdir(agentPath, { recursive: true });
+      console.log(`[StarUpCore] Ensuring config directory exists: ${agentPath}`);
+      
+      // 需要检查并复制的文件列表
+      const filesToCheck = ['AGENTS.md', 'SOUL.md', 'IDENTITY.md', 'USER.md'];
+      
+      for (const filename of filesToCheck) {
+        const targetPath = path.join(agentPath, filename);
+        const templatePath = path.join(templatesDir, filename);
+        
+        console.log(`[StarUpCore] Checking ${filename}...`);
+        
+        try {
+          // 检查文件是否已存在
+          await fs.access(targetPath);
+          console.log(`[StarUpCore]   ${filename} already exists`);
+        } catch {
+          // 文件不存在，尝试从模板复制
+          console.log(`[StarUpCore]   ${filename} not found, copying from template...`);
+          try {
+            const templateContent = await fs.readFile(templatePath, 'utf-8');
+            await fs.writeFile(targetPath, templateContent, 'utf-8');
+            console.log(`[StarUpCore] Created default ${filename}`);
+          } catch (templateError) {
+            // 模板文件不存在或读取失败
+            console.error(`[StarUpCore] Failed to copy template for ${filename}:`, templateError);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[StarUpCore] Failed to ensure config files:', error);
+    }
   }
 
   /**
