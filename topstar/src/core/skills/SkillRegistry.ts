@@ -264,6 +264,13 @@ export class SkillRegistry {
   }
 
   /**
+   * 获取所有 Skills（兼容 v1.1 接口）
+   */
+  getAll(): Skill[] {
+    return Array.from(this.skills.values());
+  }
+
+  /**
    * 获取所有 Skill 描述（用于 LLM）
    */
   getSkillDescriptions(): { id: string; name: string; description: string; version?: string }[] {

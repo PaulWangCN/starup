@@ -4,6 +4,9 @@ import ora from 'ora';
 import { Renderer } from './Renderer';
 import { commands } from './commands';
 import { StarUpCore } from '../index';
+import { PromptAssembler, createDefaultConfig, RuntimeContext } from '../core/prompt/PromptAssembler';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 /**
  * 终端聊天界面
@@ -15,10 +18,19 @@ export class TerminalChat {
   private rl: readline.Interface | null = null;
   private running: boolean = false;
   private mainSessionId: string | null = null;
+  private promptAssembler: PromptAssembler;
 
   constructor(core?: StarUpCore) {
     this.core = core || new StarUpCore();
     this.renderer = new Renderer();
+    
+    // 创建 PromptAssembler 用于生成系统提示词
+    const promptConfig = createDefaultConfig();
+    this.promptAssembler = new PromptAssembler(
+      promptConfig,
+      this.core.toolRegistry,
+      this.core.skillRegistry
+    );
   }
 
   /**
@@ -27,9 +39,15 @@ export class TerminalChat {
   async start(): Promise<void> {
     // 初始化核心
     await this.core.initialize();
+    
+    // 确保 Agent 配置存在
+    await this.ensureAgentConfig();
 
-    // 初始化主会话
-    const mainSession = this.core.sessionManager.initializeMainSession();
+    // 生成系统提示词（六层 Prompt）
+    const systemPrompt = await this.generateSystemPrompt();
+
+    // 初始化主会话，传入系统提示词
+    const mainSession = this.core.sessionManager.initializeMainSession(systemPrompt);
     this.mainSessionId = mainSession.id;
 
     // 显示欢迎界面
@@ -72,6 +90,128 @@ export class TerminalChat {
     process.on('SIGINT', () => {
       this.stop();
     });
+  }
+
+  /**
+   * 生成系统提示词
+   */
+  private async generateSystemPrompt(): Promise<string> {
+    try {
+      const runtimeContext: RuntimeContext = {
+        timestamp: Date.now(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        activeSessions: this.core.sessionManager.getActiveSessions().length,
+        systemStatus: 'healthy',
+        memoryUsage: {
+          used: process.memoryUsage().heapUsed,
+          total: process.memoryUsage().heapTotal,
+        },
+        requestId: Math.random().toString(36).substring(7),
+      };
+
+      const assembled = await this.promptAssembler.assemble('default', runtimeContext);
+      return assembled.content;
+    } catch (error) {
+      console.warn('[TerminalChat] Failed to generate system prompt:', error);
+      // 返回默认提示词
+      return this.getDefaultSystemPrompt();
+    }
+  }
+
+  /**
+   * 获取默认系统提示词
+   */
+  private getDefaultSystemPrompt(): string {
+    return [
+      '# StarUp AI Assistant',
+      '',
+      '你是 StarUp，一个专业的 AI 助手。',
+      '',
+      '## 身份',
+      '- 名称: StarUp',
+      '- 版本: 1.2.0',
+      '',
+      '## 能力',
+      '- 协助完成各种任务',
+      '- 使用工具处理文件和执行命令',
+      '- 管理和调用 Skills 扩展功能',
+      '',
+      '## 行为准则',
+      '- 友好、专业、高效',
+      '- 在不确定时承认限制',
+      '- 保护用户隐私',
+    ].join('\n');
+  }
+
+  /**
+   * 确保 Agent 配置存在
+   */
+  private async ensureAgentConfig(): Promise<void> {
+    const agentPath = path.join(process.env.HOME || '.', '.starup', 'agents', 'default');
+    
+    try {
+      await fs.mkdir(agentPath, { recursive: true });
+      
+      // 检查 SOUL.md
+      const soulPath = path.join(agentPath, 'SOUL.md');
+      try {
+        await fs.access(soulPath);
+      } catch {
+        // 创建默认 SOUL.md
+        const defaultSoul = [
+          '# SOUL - 核心人格',
+          '',
+          '你是 StarUp，一个专业、友好、高效的 AI 助手。',
+          '',
+          '## 核心价值观',
+          '- 诚实：提供准确和真实的信息',
+          '-  helpful：尽力帮助用户解决问题', 
+          '- 安全：避免产生有害或危险的内容',
+          '',
+          '## 行为准则',
+          '- 尊重用户，保持友善和专业的态度',
+          '- 在不确定时承认限制，不编造信息',
+          '- 保护用户隐私，不泄露敏感信息',
+          '- 注重效率，给出简洁而完整的回答',
+          '',
+          '## 语言风格',
+          '- 使用简洁清晰的中文',
+          '- 技术解释准确易懂',
+          '- 适当使用 emoji 增加亲和力',
+        ].join('\n');
+        await fs.writeFile(soulPath, defaultSoul, 'utf-8');
+        console.log('[TerminalChat] Created default SOUL.md');
+      }
+      
+      // 检查 IDENTITY.md
+      const identityPath = path.join(agentPath, 'IDENTITY.md');
+      try {
+        await fs.access(identityPath);
+      } catch {
+        // 创建默认 IDENTITY.md
+        const defaultIdentity = [
+          '# IDENTITY - 身份标识',
+          '',
+          '- **名称**: StarUp',
+          '- **表情符号**: ⭐',
+          '- **版本**: 1.2.0',
+          '- **代号**: TopStar',
+          '',
+          '## 性格特点',
+          '- 友好且专业',
+          '- 乐于学习和探索',
+          '- 注重效率和结果',
+          '- 善于倾听和理解',
+          '',
+          '## 问候语',
+          '你好！我是 StarUp ⭐，很高兴为你服务！',
+        ].join('\n');
+        await fs.writeFile(identityPath, defaultIdentity, 'utf-8');
+        console.log('[TerminalChat] Created default IDENTITY.md');
+      }
+    } catch (error) {
+      console.warn('[TerminalChat] Failed to ensure agent config:', error);
+    }
   }
 
   /**
