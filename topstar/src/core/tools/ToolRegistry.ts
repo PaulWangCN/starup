@@ -12,10 +12,19 @@ const execAsync = promisify(exec);
  */
 export class ToolRegistry {
   private tools: Map<string, ToolDefinition> = new Map();
-  private workingDir: string = process.cwd();
+  private workingDir: string;
 
   constructor() {
+    // 设置工作目录为当前目录或项目根目录
+    this.workingDir = process.cwd();
+    
+    // 如果是从 node_modules 或 dist 运行，向上查找项目根目录
+    if (this.workingDir.includes('node_modules') || this.workingDir.includes('dist')) {
+      this.workingDir = path.resolve(this.workingDir, '..');
+    }
+    
     this.registerCoreTools();
+    console.log(`[ToolRegistry] Working directory: ${this.workingDir}`);
   }
 
   /**
@@ -93,6 +102,14 @@ export class ToolRegistry {
    */
   setWorkingDir(dir: string): void {
     this.workingDir = dir;
+    console.log(`[ToolRegistry] Working directory set to: ${dir}`);
+  }
+
+  /**
+   * 获取工作目录
+   */
+  getWorkingDir(): string {
+    return this.workingDir;
   }
 
   // ==================== 核心工具注册 ====================
@@ -235,28 +252,38 @@ export class ToolRegistry {
         }
 
         try {
+          console.log(`[ToolRegistry] Executing: ${args.command}`);
+          
           const { stdout, stderr } = await execAsync(args.command, {
             timeout: timeout * 1000,
             cwd: this.workingDir,
             env: { ...process.env, ...args.env },
+            windowsHide: true, // Windows: 隐藏命令窗口
+            shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/bash',
           });
+          
+          console.log(`[ToolRegistry] Command completed successfully`);
           
           return {
             success: true,
             data: {
-              stdout,
-              stderr,
+              stdout: stdout || '(no output)',
+              stderr: stderr || '(no stderr)',
               exitCode: 0,
+              workingDir: this.workingDir,
             },
           };
         } catch (error: any) {
+          console.error(`[ToolRegistry] Command failed:`, error.message);
+          
           return {
             success: false,
             error: error.message,
             data: {
-              stdout: error.stdout,
-              stderr: error.stderr,
-              exitCode: error.code,
+              stdout: error.stdout || '',
+              stderr: error.stderr || '',
+              exitCode: error.code || 1,
+              workingDir: this.workingDir,
             },
           };
         }
@@ -279,8 +306,9 @@ export class ToolRegistry {
           data: {
             query: args.query,
             results: [
-              { title: 'Search API not configured', url: '', snippet: 'Please configure web search API' },
+              { title: 'Search API not configured', url: '', snippet: 'Please configure web search API in .env file (BING_API_KEY or SERPAPI_KEY)' },
             ],
+            note: 'To enable web search, add BING_API_KEY=your_key to .env file',
           },
         };
       },
@@ -294,6 +322,9 @@ export class ToolRegistry {
         type: param.type,
         description: param.description,
       };
+      if (param.default !== undefined) {
+        result[param.name].default = param.default;
+      }
     }
     return result;
   }
