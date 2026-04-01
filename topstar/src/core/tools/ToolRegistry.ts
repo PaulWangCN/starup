@@ -5,7 +5,6 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { metaInstallerSkill } from '../skills/MetaInstallerSkill';
 
-
 const execAsync = promisify(exec);
 
 /**
@@ -14,52 +13,46 @@ const execAsync = promisify(exec);
  */
 export class ToolRegistry {
   private tools: Map<string, ToolDefinition> = new Map();
+  private toolSources: Map<string, string> = new Map();
   private workingDir: string;
 
   constructor() {
-    // 设置工作目录为当前目录或项目根目录
     this.workingDir = process.cwd();
-    
-    // 如果是从 node_modules 或 dist 运行，向上查找项目根目录
     if (this.workingDir.includes('node_modules') || this.workingDir.includes('dist')) {
       this.workingDir = path.resolve(this.workingDir, '..');
     }
-    
     this.registerCoreTools();
   }
 
-  /**
-   * 注册工具
-   */
-  register(tool: ToolDefinition): void {
+  register(tool: ToolDefinition, source?: string): void {
     this.tools.set(tool.name, tool);
+    if (source) {
+      this.toolSources.set(tool.name, source);
+    }
   }
 
-  /**
-   * 获取工具
-   */
+  setToolSource(name: string, source: string): void {
+    this.toolSources.set(name, source);
+  }
+
   get(name: string): ToolDefinition | undefined {
     return this.tools.get(name);
   }
 
-  /**
-   * 获取所有工具
-   */
   getAll(): ToolDefinition[] {
     return Array.from(this.tools.values());
   }
 
-  /**
-   * 获取工具列表（用于LLM）
-   */
   getToolDescriptions(): any[] {
     return this.getAll().map((tool) => {
       const parameters = tool.parameters || [];
+      const source = this.toolSources.get(tool.name);
+      const sourceNote = source ? `（来源: ${source}）` : '（系统内置工具）';
       return {
         type: 'function',
         function: {
           name: tool.name,
-          description: tool.description,
+          description: `${tool.description}\n${sourceNote}`,
           parameters: {
             type: 'object',
             properties: this.convertParameters(parameters),
@@ -70,44 +63,26 @@ export class ToolRegistry {
     });
   }
 
-  /**
-   * 执行工具
-   */
   async execute(name: string, args: any, session: Session): Promise<ToolResult> {
     const tool = this.tools.get(name);
     if (!tool) {
       return { success: false, error: `Tool '${name}' not found` };
     }
-
-    // 检查权限
     if (!session.allowedTools.includes(name)) {
-      return { 
-        success: false, 
-        error: `Tool '${name}' not allowed in this session` 
-      };
+      return { success: false, error: `Tool '${name}' not allowed in this session` };
     }
-
     try {
       return await tool.handler(args, session);
     } catch (error) {
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : String(error) 
-      };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
-  /**
-   * 设置工作目录
-   */
   setWorkingDir(dir: string): void {
     this.workingDir = dir;
     console.log(`[ToolRegistry] Working directory set to: ${dir}`);
   }
 
-  /**
-   * 获取工作目录
-   */
   getWorkingDir(): string {
     return this.workingDir;
   }
@@ -126,26 +101,18 @@ export class ToolRegistry {
       ],
       handler: async (args) => {
         const filePath = path.resolve(this.workingDir, args.path);
-        
-        // 安全检查：防止越权访问
         if (!filePath.startsWith(this.workingDir) && !filePath.startsWith(process.env.HOME || '')) {
           return { success: false, error: 'Access denied: path outside allowed directories' };
         }
-
         try {
           const content = await fs.readFile(filePath, 'utf-8');
           const lines = content.split('\n');
           const offset = (args.offset || 1) - 1;
           const limit = args.limit || 1000;
           const selectedLines = lines.slice(offset, offset + limit);
-          
           return {
             success: true,
-            data: {
-              content: selectedLines.join('\n'),
-              totalLines: lines.length,
-              readLines: selectedLines.length,
-            },
+            data: { content: selectedLines.join('\n'), totalLines: lines.length, readLines: selectedLines.length },
           };
         } catch (error) {
           return { success: false, error: `Failed to read file: ${error}` };
@@ -164,22 +131,16 @@ export class ToolRegistry {
       ],
       handler: async (args) => {
         const filePath = path.resolve(this.workingDir, args.path);
-        
-        // 安全检查
         if (!filePath.startsWith(this.workingDir) && !filePath.startsWith(process.env.HOME || '')) {
           return { success: false, error: 'Access denied: path outside allowed directories' };
         }
-
         try {
-          // 确保目录存在
           await fs.mkdir(path.dirname(filePath), { recursive: true });
-          
           if (args.mode === 'append') {
             await fs.appendFile(filePath, args.content, 'utf-8');
           } else {
             await fs.writeFile(filePath, args.content, 'utf-8');
           }
-          
           return { success: true, data: { path: filePath, mode: args.mode } };
         } catch (error) {
           return { success: false, error: `Failed to write file: ${error}` };
@@ -199,31 +160,21 @@ export class ToolRegistry {
       ],
       handler: async (args) => {
         const filePath = path.resolve(this.workingDir, args.path);
-        
         try {
           const content = await fs.readFile(filePath, 'utf-8');
-          
           if (!content.includes(args.old)) {
             return { success: false, error: 'Old text not found in file' };
           }
-          
           let newContent: string;
           if (args.replace_all) {
             newContent = content.split(args.old).join(args.new);
           } else {
             newContent = content.replace(args.old, args.new);
           }
-          
           await fs.writeFile(filePath, newContent, 'utf-8');
-          
           return {
             success: true,
-            data: {
-              path: filePath,
-              replacements: args.replace_all 
-                ? content.split(args.old).length - 1 
-                : 1,
-            },
+            data: { path: filePath, replacements: args.replace_all ? content.split(args.old).length - 1 : 1 },
           };
         } catch (error) {
           return { success: false, error: `Failed to edit file: ${error}` };
@@ -234,27 +185,22 @@ export class ToolRegistry {
     // exec: 执行shell命令
     this.register({
       name: 'exec',
-      description: '执行shell命令（自动适配 Windows/Mac/Linux）。常用命令：Windows用"dir"、Mac/Linux用"ls"。支持超时控制，默认60秒。',
+      description: '执行本地系统shell命令（自动适配 Windows/Mac/Linux）。这是通用系统命令工具，仅用于执行本地文件/系统操作。\n注意：如果某个skill已经提供了专门工具（如web_search、weather），请优先使用该skill的工具，不要用exec去模拟实现相同功能。',
       parameters: [
         { name: 'command', type: 'string', description: '要执行的命令。Windows: 用dir/cd; Mac/Linux: 用ls/pwd', required: true },
         { name: 'timeout', type: 'number', description: '超时时间（秒）', required: false, default: 60 },
       ],
       handler: async (args) => {
         const timeout = Math.min(args.timeout || 60, 300);
-        
-        // 高危命令检查
         const dangerousCommands = ['rm -rf /', 'mkfs', 'dd if=/dev/zero', 'format', 'del /f /s /q'];
         for (const dangerous of dangerousCommands) {
           if (args.command.toLowerCase().includes(dangerous)) {
             return { success: false, error: 'Dangerous command blocked for security' };
           }
         }
-
         try {
-          // 转换 Unix 命令到 Windows
           let command = args.command;
           if (process.platform === 'win32') {
-            // 简单的命令转换
             command = command
               .replace(/^ls\s+-la$/i, 'dir')
               .replace(/^ls\s+(-[a-z]+)?\s*/i, 'dir ')
@@ -264,11 +210,8 @@ export class ToolRegistry {
               .replace(/^mv\s+/i, 'move ')
               .replace(/^rm\s+/i, 'del ')
               .replace(/^touch\s+/i, 'type nul > ');
-            
-            // Windows: 先设置 UTF-8 编码
             command = `chcp 65001 >nul && ${command}`;
           }
-          
           const { stdout, stderr } = await execAsync(command, {
             timeout: timeout * 1000,
             cwd: this.workingDir,
@@ -276,136 +219,56 @@ export class ToolRegistry {
             windowsHide: true,
             shell: process.platform === 'win32' ? 'cmd.exe' : undefined,
           });
-          
-          // 清理 Windows 编码设置输出
           let output = (stdout || '').replace(/^Active code page: \d+\r?\n?/i, '').trim();
           let errOutput = (stderr || '').trim();
-          
-          // 限制输出长度，避免截断
           const maxLen = 3000;
-          if (output.length > maxLen) {
-            output = output.substring(0, maxLen) + '\n... (output truncated)';
-          }
-          if (errOutput.length > maxLen) {
-            errOutput = errOutput.substring(0, maxLen) + '\n... (stderr truncated)';
-          }
-          
+          if (output.length > maxLen) output = output.substring(0, maxLen) + '\n... (output truncated)';
+          if (errOutput.length > maxLen) errOutput = errOutput.substring(0, maxLen) + '\n... (stderr truncated)';
           return {
             success: true,
-            data: {
-              stdout: output || '(no output)',
-              stderr: errOutput || '(no stderr)',
-              exitCode: 0,
-              platform: process.platform,
-            },
+            data: { stdout: output || '(no output)', stderr: errOutput || '(no stderr)', exitCode: 0, platform: process.platform },
           };
         } catch (error: any) {
-          // 处理错误输出
           let errorMsg = error.message;
           let stdout = (error.stdout || '').toString();
           let stderr = (error.stderr || '').toString();
-          
-          // 清理 Windows 编码设置输出
           stdout = stdout.replace(/^Active code page: \d+\r?\n?/i, '').trim();
           stderr = stderr.replace(/^Active code page: \d+\r?\n?/i, '').trim();
-          
-          // 如果是 Windows 命令未找到错误，给出友好提示
           if (process.platform === 'win32' && error.code === 'ENOENT') {
             errorMsg = `Command not found. On Windows, try using "dir" instead of "ls", "cd" instead of "pwd"`;
           }
-          
           return {
             success: false,
             error: errorMsg,
-            data: {
-              stdout: stdout.substring(0, 3000),
-              stderr: stderr.substring(0, 3000),
-              exitCode: error.code || 1,
-              platform: process.platform,
-            },
+            data: { stdout: stdout.substring(0, 3000), stderr: stderr.substring(0, 3000), exitCode: error.code || 1, platform: process.platform },
           };
         }
-      },
-    });
-
-    // web_search: 网络搜索
-    this.register({
-      name: 'web_search',
-      description: '执行网络搜索获取信息。如果搜索功能未配置，会建议安装 search skill。',
-      parameters: [
-        { name: 'query', type: 'string', description: '搜索查询', required: true },
-        { name: 'limit', type: 'number', description: '结果数量', required: false, default: 5 },
-      ],
-      handler: async (args) => {
-        // 提示用户安装 search skill
-        return {
-          success: false,
-          error: 'Web search not configured',
-          suggestion: '建议安装 search skill 来启用网络搜索功能',
-          installCommand: 'skillhub install search',
-          data: {
-            query: args.query,
-            message: '网络搜索功能需要通过安装 Skill 来启用。运行 "skillhub install search" 或 "startup skill install search" 安装搜索技能。',
-          },
-        };
       },
     });
 
     // install_skill: 安装 Skill
     this.register({
       name: 'install_skill',
-      description: `安装 Skill 来扩展系统功能。
-
-【工作流程 - 自动执行】
-1. 在 ClawHub 搜索确认 skill 存在性
-2. 如不存在，提示用户并建议相似 skill
-3. 如存在多个，列出让用户选择
-4. 如存在单个，显示详情让用户确认
-5. 用户确认后通过 ClawHub 安装
-6. 返回安装结果
-
-【使用方式】
-直接调用此工具，传入 skill_name，无需告知用户中间步骤
-
-【示例】
-用户："安装 web_search skill"
-你：调用 install_skill({"skill_name": "web_search"})
-然后根据返回结果告知用户即可`,
+      description: `安装 Skill 来扩展系统功能。直接调用，传入 skill_name 即可。`,
       parameters: [
         { name: 'skill_name', type: 'string', description: 'Skill 名称或 ID，如 "web_search", "weather", "translator"', required: true },
         { name: 'version', type: 'string', description: '版本号，如 "1.0.0"，不指定则安装最新版', required: false },
       ],
       handler: async (args, session) => {
-        const skillName = args.skill_name;
-        const version = args.version;
-
         try {
-          // v1.3.2: 直接使用 MetaInstallerSkill（内部已集成 ClawHub）
           const result = await metaInstallerSkill.install(
-            {
-              skill_hint: skillName,
-              version: version,
-            },
-            {
-              session,
-              recentMessages: [],
-              userPreferences: {},
-            }
+            { skill_hint: args.skill_name, version: args.version },
+            { session, recentMessages: [], userPreferences: {} }
           );
-
           return {
             success: result.success,
             data: result.data,
             message: result.message,
             requires_confirmation: result.requires_confirmation,
-            confirmation_type: result.confirmation_type,
             error: result.success ? undefined : result.message,
           };
         } catch (error) {
-          return {
-            success: false,
-            error: `安装失败: ${error instanceof Error ? error.message : String(error)}`,
-          };
+          return { success: false, error: `安装失败: ${error instanceof Error ? error.message : String(error)}` };
         }
       },
     });
@@ -426,5 +289,4 @@ export class ToolRegistry {
   }
 }
 
-// 单例导出
 export const toolRegistry = new ToolRegistry();

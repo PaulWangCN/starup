@@ -1,7 +1,5 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import * as crypto from 'crypto';
-import axios from 'axios';
 import YAML from 'yaml';
 import {
   InstallSpec,
@@ -9,29 +7,18 @@ import {
   InstallResult,
   SkillPackage,
   SkillManifest,
-  SkillStatus,
-  DependencyTree,
-  ResolutionConstraints,
   UpgradeResult,
-  InstallError,
-  DependencyError,
-  TransactionError,
 } from '../../types';
-import { DependencyResolver } from './DependencyResolver';
-import { SignatureVerifier } from '../install/SignatureVerifier';
 import { PackageDownloader } from '../install/PackageDownloader';
 
 /**
- * 安装管理器
- * 负责 Skill 的安装、卸载、升级和依赖管理
- * 支持原子化操作和失败回滚
+ * 安装管理器（简化版）
+ * 仅负责 skill 目录的获取、复制、记录和删除。
  */
 export class InstallManager {
   private skillDbPath: string;
   private cachePath: string;
   private userSkillsDir: string;
-  private dependencyResolver: DependencyResolver;
-  private signatureVerifier: SignatureVerifier;
   private packageDownloader: PackageDownloader;
   private installedSkills: Map<string, SkillPackage> = new Map();
 
@@ -40,181 +27,73 @@ export class InstallManager {
     this.skillDbPath = path.join(starupHome, 'skilldb');
     this.cachePath = path.join(this.skillDbPath, 'cache');
     this.userSkillsDir = path.join(starupHome, 'skills');
-    
-    this.dependencyResolver = new DependencyResolver(this.cachePath);
-    this.signatureVerifier = new SignatureVerifier();
     this.packageDownloader = new PackageDownloader(this.cachePath);
   }
 
-  /**
-   * 初始化安装管理器
-   */
   async initialize(): Promise<void> {
-    console.log('[InstallManager] Initializing...');
-    
-    // 创建必要目录
     await fs.mkdir(this.skillDbPath, { recursive: true });
     await fs.mkdir(this.cachePath, { recursive: true });
     await fs.mkdir(this.userSkillsDir, { recursive: true });
-    
-    // 加载已安装的 Skill
     await this.loadInstalledSkills();
-    
-    console.log(`[InstallManager] Loaded ${this.installedSkills.size} installed skills`);
   }
 
   /**
-   * 主安装入口
-   * 完整的7阶段安装流程：解析→获取→校验→依赖→隔离→注册→加载
-   * v1.3: 使用事务保证原子性
+   * 安装 skill
    */
   async install(spec: InstallSpec, options: InstallOptions = {}): Promise<InstallResult> {
-    const startTime = Date.now();
-    const tx = new InstallTransaction();
-    
     try {
-      // 验证 spec 参数
-      if (!spec || (typeof spec === 'object' && !spec.id && !spec.url && !spec.path)) {
-        return {
-          success: false,
-          message: '安装参数无效：缺少 skill ID 或安装源',
-        };
-      }
-      
-      console.log(`[InstallManager] Installing ${spec.id || spec.url || spec.path}...`);
-      
-      // Phase 1: 解析安装指令
       const parsedSpec = await this.parseInstallSpec(spec);
-      
-      // 验证解析后的 spec
       if (!parsedSpec.id && !parsedSpec.url && !parsedSpec.path) {
-        return {
-          success: false,
-          message: '无法解析安装参数：请提供有效的 skill 名称、URL 或本地路径',
-        };
+        return { success: false, message: '安装参数无效：缺少 skill ID 或安装源' };
       }
-      
-      console.log(`[InstallManager] Parsed spec: ${parsedSpec.id || parsedSpec.url || parsedSpec.path}@${parsedSpec.version || 'latest'}`);
-      
-      // Phase 2: 获取包
+
       const packagePath = await this.acquirePackage(parsedSpec, options);
-      tx.recordDownload(packagePath);
-      console.log(`[InstallManager] Package acquired: ${packagePath}`);
-      
-      // Phase 3: 校验
-      if (options.verify !== false) {
-        const valid = await this.verifyPackage(packagePath, parsedSpec);
-        if (!valid) {
-          throw new InstallError('Package signature verification failed', 'verify');
-        }
-      }
-      
-      // 解析 manifest
       const manifest = await this.parseManifest(packagePath);
-      tx.setTargetSkill(manifest.id);
-      
-      // Phase 4: 依赖解析
-      if (manifest.dependencies && manifest.dependencies.length > 0) {
-        const constraints: ResolutionConstraints = {
-          strategies: {
-            upgrade: 'auto',
-            multi_version: true,
-            cycle_detection: 'error',
-          },
-        };
-        
-        const depTree = await this.dependencyResolver.resolve(
-          manifest.dependencies,
-          constraints
-        );
-        
-        if (depTree.conflicts.length > 0) {
-          throw new DependencyError('Dependency conflicts detected', depTree.conflicts);
-        }
-        
-        // 安装依赖
-        for (const dep of depTree.install_order) {
-          if (!this.installedSkills.has(dep.manifest.id)) {
-            const depResult = await this.installDependency(dep);
-            tx.recordDependency(dep.manifest.id);
-          }
-        }
+      const skillPath = path.join(this.userSkillsDir, manifest.id);
+
+      if (options.force) {
+        await fs.rm(skillPath, { recursive: true, force: true });
       }
-      
-      // Phase 5-6: 隔离与注册
-      const skillPath = await this.registerSkill(manifest, packagePath, options);
-      tx.recordPlacement(skillPath);
-      
-      // Phase 7: 激活
-      await this.activateSkill(manifest.id);
-      tx.commit();
-      
-      const duration = Date.now() - startTime;
-      console.log(`[InstallManager] Installed ${manifest.id}@${manifest.version} in ${duration}ms`);
-      
+
+      await fs.mkdir(skillPath, { recursive: true });
+      await this.copyDirectory(packagePath, skillPath);
+
+      const pkg: SkillPackage = {
+        manifest,
+        path: skillPath,
+        status: 'active',
+        installedAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      this.installedSkills.set(manifest.id, pkg);
+      await this.saveSkillDb();
+
       return {
         success: true,
         skillId: manifest.id,
         version: manifest.version,
         message: `Successfully installed ${manifest.name}@${manifest.version}`,
-        dependencies: manifest.dependencies,
       };
-      
     } catch (error) {
       console.error('[InstallManager] Installation failed:', error);
-      
-      // 事务回滚
-      const rollbackSuccess = await tx.rollback(this);
-      
       return {
         success: false,
         message: error instanceof Error ? error.message : 'Unknown error',
-        error: error instanceof Error ? error.stack : undefined,
       };
     }
   }
 
   /**
-   * 事务性卸载
+   * 卸载 skill
    */
   async uninstall(skillId: string, options: { purgeData?: boolean } = {}): Promise<boolean> {
     try {
-      console.log(`[InstallManager] Uninstalling ${skillId}...`);
-      
-      const skill = this.installedSkills.get(skillId);
-      if (!skill) {
-        console.warn(`[InstallManager] Skill ${skillId} not found`);
-        return false;
-      }
-      
-      // 检查依赖此 Skill 的其他 Skill
-      const dependents = await this.findDependents(skillId);
-      if (dependents.length > 0) {
-        throw new InstallError(
-          `Cannot uninstall: ${dependents.join(', ')} depend on this skill`,
-          'dependents'
-        );
-      }
-      
-      // 停用 Skill
-      await this.deactivateSkill(skillId);
-      
-      // 删除文件
-      await fs.rm(skill.path, { recursive: true, force: true });
-      
-      // 清理数据（如果指定）
-      if (options.purgeData) {
-        const dataPath = path.join(this.userSkillsDir, skillId, 'data');
-        await fs.rm(dataPath, { recursive: true, force: true });
-      }
-      
-      // 从注册表移除
+      const skillPath = path.join(this.userSkillsDir, skillId);
+      await fs.rm(skillPath, { recursive: true, force: true });
       this.installedSkills.delete(skillId);
       await this.saveSkillDb();
-      
-      console.log(`[InstallManager] Uninstalled ${skillId}`);
       return true;
-      
     } catch (error) {
       console.error(`[InstallManager] Failed to uninstall ${skillId}:`, error);
       return false;
@@ -222,601 +101,76 @@ export class InstallManager {
   }
 
   /**
-   * 原子性升级（蓝绿部署）
+   * 升级 skill（简化：先卸载再安装）
    */
   async upgrade(skillId: string, toVersion: string): Promise<UpgradeResult> {
-    const startTime = Date.now();
-    
-    try {
-      console.log(`[InstallManager] Upgrading ${skillId} to ${toVersion}...`);
-      
-      const skill = this.installedSkills.get(skillId);
-      if (!skill) {
-        throw new InstallError(`Skill ${skillId} not found`, 'not_found');
-      }
-      
-      const oldVersion = skill.manifest.version;
-      
-      // 标记为升级中
-      skill.status = 'upgrading';
-      await this.saveSkillDb();
-      
-      // 蓝绿部署：先安装新版本到临时目录
-      const tempId = `${skillId}-upgrade-${Date.now()}`;
-      const upgradeSpec: InstallSpec = {
-        source: 'marketplace',
-        id: skillId,
-        version: toVersion,
-      };
-      
-      // 安装新版本
-      const result = await this.install(upgradeSpec, { force: true });
-      if (!result.success) {
-        throw new InstallError(`Failed to install new version: ${result.message}`, 'upgrade');
-      }
-      
-      // 原子切换
-      const newSkill = this.installedSkills.get(skillId);
-      if (!newSkill) {
-        throw new InstallError('Upgrade failed: new version not found', 'upgrade');
-      }
-      
-      // 保留旧版本备份
-      const backupPath = `${skill.path}.backup-${oldVersion}`;
-      await fs.rename(skill.path, backupPath);
-      
-      // 更新状态
-      newSkill.status = 'active';
-      await this.saveSkillDb();
-      
-      // 清理备份（异步）
-      setTimeout(async () => {
-        await fs.rm(backupPath, { recursive: true, force: true });
-      }, 60000);
-      
-      const duration = Date.now() - startTime;
-      
-      return {
-        success: true,
-        oldVersion,
-        newVersion: toVersion,
-        downtime_ms: duration,
-        rollbackAvailable: true,
-      };
-      
-    } catch (error) {
-      console.error(`[InstallManager] Upgrade failed:`, error);
-      
-      // 恢复状态
-      const skill = this.installedSkills.get(skillId);
-      if (skill) {
-        skill.status = 'active';
-        await this.saveSkillDb();
-      }
-      
-      return {
-        success: false,
-        oldVersion: skill?.manifest.version || 'unknown',
-        newVersion: toVersion,
-        downtime_ms: Date.now() - startTime,
-        rollbackAvailable: false,
-      };
-    }
-  }
-
-  /**
-   * 查询依赖树
-   */
-  async dependencyTree(skillId: string): Promise<DependencyTree | null> {
     const skill = this.installedSkills.get(skillId);
-    if (!skill) return null;
-    
-    if (!skill.manifest.dependencies || skill.manifest.dependencies.length === 0) {
-      return {
-        root: {
-          id: skillId,
-          version: skill.manifest.version,
-          resolved: true,
-          children: [],
-        },
-        conflicts: [],
-        install_order: [],
-      };
+    if (!skill) {
+      return { success: false, oldVersion: 'unknown', newVersion: toVersion, downtime_ms: 0, rollbackAvailable: false };
     }
-    
-    return this.dependencyResolver.resolve(skill.manifest.dependencies, {
-      strategies: {
-        upgrade: 'auto',
-        multi_version: true,
-        cycle_detection: 'error',
-      },
-    });
+    const oldVersion = skill.manifest.version;
+
+    await this.uninstall(skillId);
+    const result = await this.install({ source: 'marketplace', id: skillId, version: toVersion }, { force: true });
+
+    return {
+      success: result.success,
+      oldVersion,
+      newVersion: toVersion,
+      downtime_ms: 0,
+      rollbackAvailable: false,
+    };
   }
 
-  /**
-   * 列出已安装 Skill
-   */
   list(): SkillPackage[] {
     return Array.from(this.installedSkills.values());
   }
 
-  /**
-   * 获取 Skill 信息
-   */
   get(skillId: string): SkillPackage | undefined {
     return this.installedSkills.get(skillId);
   }
 
   // ==================== 私有方法 ====================
 
-  /**
-   * 解析安装指令
-   */
   private async parseInstallSpec(spec: InstallSpec): Promise<InstallSpec> {
-    // 如果是字符串，解析为 spec
     if (typeof spec === 'string') {
       const str = spec as string;
-      
-      // git: 前缀
-      if (str.startsWith('git:') || str.startsWith('github:')) {
-        return { source: 'git', url: str };
-      }
-      
-      // http(s):// 前缀
-      if (str.startsWith('http://') || str.startsWith('https://')) {
-        return { source: 'url', url: str };
-      }
-      
-      // 本地路径
-      if (str.startsWith('./') || str.startsWith('../') || str.startsWith('/')) {
-        return { source: 'local', path: str };
-      }
-      
-      // marketplace 格式: name@version
+      if (str.startsWith('git:') || str.startsWith('github:')) return { source: 'git', url: str };
+      if (str.startsWith('http://') || str.startsWith('https://')) return { source: 'url', url: str };
+      if (str.startsWith('./') || str.startsWith('../') || str.startsWith('/')) return { source: 'local', path: str };
       const match = str.match(/^([^@]+)(?:@(.+))?$/);
-      if (match) {
-        return {
-          source: 'marketplace',
-          id: match[1],
-          version: match[2] || 'latest',
-        };
-      }
+      if (match) return { source: 'marketplace', id: match[1], version: match[2] || 'latest' };
     }
-    
     return spec;
   }
 
-  /**
-   * 获取包
-   */
   private async acquirePackage(spec: InstallSpec, options: InstallOptions): Promise<string> {
     switch (spec.source) {
       case 'marketplace':
-        return this.packageDownloader.downloadFromMarketplace(
-          spec.id!,
-          spec.version,
-          spec.registry,
-          options.offline
-        );
-        
+        return this.packageDownloader.downloadFromMarketplace(spec.id!, spec.version, spec.registry, options.offline);
       case 'git':
         return this.packageDownloader.downloadFromGit(spec.url!, options.offline);
-        
       case 'url':
         return this.packageDownloader.downloadFromUrl(spec.url!, options.offline);
-        
       case 'local':
         return spec.path!;
-        
       default:
-        throw new InstallError(`Unknown source: ${(spec as any).source}`, 'acquire');
+        throw new Error(`Unknown source: ${(spec as any).source}`);
     }
   }
 
-  /**
-   * 验证包
-   * v1.3.2: 支持 clawhub 标记文件
-   */
-  private async verifyPackage(packagePath: string, spec: InstallSpec): Promise<boolean> {
-    try {
-      // 检查文件是否存在
-      const stats = await fs.stat(packagePath);
-      
-      // 如果是 .claw 文件，检查是否是 clawhub 标记文件
-      if (!stats.isDirectory() && packagePath.endsWith('.claw')) {
-        const content = await fs.readFile(packagePath, 'utf-8');
-        
-        try {
-          const metadata = JSON.parse(content);
-          if (metadata.source === 'clawhub' && metadata.path) {
-            // 验证 clawhub 安装的实际路径
-            const manifestPath = path.join(metadata.path, 'manifest.yaml');
-            await fs.access(manifestPath);
-            console.log(`[InstallManager] Verified clawhub package at ${metadata.path}`);
-            return true;
-          }
-        } catch {
-          // 不是 JSON，按常规 .claw 处理
-        }
-        
-        // 常规 .claw 文件，需要解压
-        const extractDir = packagePath.replace('.claw', '');
-        await this.extractClawPackage(packagePath, extractDir);
-        return true; // 解压成功即视为验证通过
-      }
-      
-      if (!stats.isDirectory()) {
-        return false;
-      }
-      
-      // 检查 manifest
-      const manifestPath = path.join(packagePath, 'manifest.yaml');
-      await fs.access(manifestPath);
-      
-      // 验证签名（如果是下载的包）
-      if (spec.source !== 'local' && spec.source !== 'git') {
-        const sigValid = await this.signatureVerifier.verify(packagePath);
-        if (!sigValid) {
-          console.warn('[InstallManager] Signature verification failed');
-          return false;
-        }
-      }
-      
-      return true;
-    } catch (error) {
-      console.error('[InstallManager] Package verification failed:', error);
-      return false;
-    }
-  }
-
-  /**
-   * 解析 manifest
-   * v1.3.2: 支持 clawhub 安装的包
-   */
   private async parseManifest(packagePath: string): Promise<SkillManifest> {
-    // 如果是 .claw 文件，检查是否是 clawhub 标记文件
-    if (packagePath.endsWith('.claw')) {
-      const content = await fs.readFile(packagePath, 'utf-8');
-      
-      // 检查是否是 clawhub 标记文件
-      try {
-        const metadata = JSON.parse(content);
-        if (metadata.source === 'clawhub' && metadata.path) {
-          // 这是 clawhub 安装的包，直接使用安装路径
-          console.log(`[InstallManager] Using clawhub installed package at ${metadata.path}`);
-          packagePath = metadata.path;
-          
-          const manifestPath = path.join(packagePath, 'manifest.yaml');
-          const manifestContent = await fs.readFile(manifestPath, 'utf-8');
-          return YAML.parse(manifestContent) as SkillManifest;
-        }
-      } catch {
-        // 不是 JSON，继续按常规 .claw 处理
-      }
-      
-      // 常规 .claw 文件，需要解压
-      const extractDir = packagePath.replace('.claw', '');
-      await this.extractClawPackage(packagePath, extractDir);
-      packagePath = extractDir;
-    }
-    
     const manifestPath = path.join(packagePath, 'manifest.yaml');
     const content = await fs.readFile(manifestPath, 'utf-8');
     return YAML.parse(content) as SkillManifest;
   }
 
-  /**
-   * 解压 .claw 包
-   */
-  private async extractClawPackage(clawPath: string, extractDir: string): Promise<void> {
-    // 检查是否已解压
-    try {
-      await fs.access(path.join(extractDir, 'manifest.yaml'));
-      console.log(`[InstallManager] Using cached extracted package: ${extractDir}`);
-      return;
-    } catch {
-      // 需要解压
-    }
-
-    console.log(`[InstallManager] Extracting ${clawPath} to ${extractDir}...`);
-    
-    await fs.mkdir(extractDir, { recursive: true });
-    
-    // 检查文件头，确认是有效的压缩包格式
-    const fd = await fs.open(clawPath, 'r');
-    const headerBuffer = Buffer.alloc(4);
-    await fd.read(headerBuffer, 0, 4, 0);
-    await fd.close();
-    
-    const isGzip = headerBuffer[0] === 0x1f && headerBuffer[1] === 0x8b;
-    const isZip = headerBuffer[0] === 0x50 && headerBuffer[1] === 0x4b && headerBuffer[2] === 0x03 && headerBuffer[3] === 0x04;
-    
-    if (!isGzip && !isZip) {
-      const headerHex = headerBuffer.toString('hex');
-      const headerPreview = headerBuffer.toString('utf-8').replace(/[^\x20-\x7E]/g, '?');
-      throw new Error(
-        `Invalid .claw package format: file is not a valid archive (expected gzip or zip, got header 0x${headerHex} / "${headerPreview}"). ` +
-        `The registry may have returned an error page instead of the actual package.`
-      );
-    }
-    
-    // 使用 tar 解压（.claw 实际上是 tar.gz 格式）
-    const { exec } = require('child_process');
-    const { promisify } = require('util');
-    const execAsync = promisify(exec);
-    
-    try {
-      // 尝试用 tar 解压
-      const tarCmd = process.platform === 'win32' ? 'tar.exe' : 'tar';
-      await execAsync(`${tarCmd} -xzf "${clawPath}" -C "${extractDir}"`);
-      console.log(`[InstallManager] Extracted successfully`);
-    } catch (error) {
-      // tar 失败，尝试作为 zip 解压
-      try {
-        if (process.platform === 'win32') {
-          // Windows 上使用 PowerShell Expand-Archive
-          await execAsync(`powershell -Command "Expand-Archive -Path '${clawPath.replace(/'/g, "''")}' -DestinationPath '${extractDir.replace(/'/g, "''")}' -Force"`);
-        } else {
-          await execAsync(`unzip -o "${clawPath}" -d "${extractDir}"`);
-        }
-        console.log(`[InstallManager] Extracted as zip successfully`);
-      } catch {
-        // 如果都失败，直接复制文件内容（可能 .claw 不是压缩包）
-        console.warn(`[InstallManager] Failed to extract, treating as plain file`);
-        throw new Error('Failed to extract .claw package');
-      }
-    }
-  }
-
-  /**
-   * 注册 Skill
-   * v1.3.2: 支持 clawhub 安装的包
-   */
-  private async registerSkill(
-    manifest: SkillManifest,
-    packagePath: string,
-    options: InstallOptions
-  ): Promise<string> {
-    const skillPath = path.join(this.userSkillsDir, manifest.id);
-    
-    // 检查是否是 clawhub 标记文件
-    let isClawhubPackage = false;
-    let clawhubPath: string | null = null;
-    
-    if (packagePath.endsWith('.claw')) {
-      try {
-        const content = await fs.readFile(packagePath, 'utf-8');
-        const metadata = JSON.parse(content);
-        if (metadata.source === 'clawhub' && metadata.path) {
-          isClawhubPackage = true;
-          clawhubPath = metadata.path;
-        }
-      } catch {
-        // 不是 clawhub 标记文件
-      }
-    }
-    
-    // 清理旧版本
-    if (options.force) {
-      await fs.rm(skillPath, { recursive: true, force: true });
-    }
-    
-    if (isClawhubPackage && clawhubPath) {
-      // clawhub 安装的包：创建软链接到 clawhub 目录
-      console.log(`[InstallManager] Linking clawhub package from ${clawhubPath}`);
-      
-      // 确保父目录存在
-      await fs.mkdir(path.dirname(skillPath), { recursive: true });
-      
-      // 如果目标已存在，先删除
-      try {
-        await fs.rm(skillPath, { recursive: true, force: true });
-      } catch {
-        // 忽略错误
-      }
-      
-      // 创建软链接
-      await fs.symlink(clawhubPath, skillPath, 'junction');
-      
-      // 创建数据目录（在 clawhub 目录下）
-      const dataPath = path.join(clawhubPath, 'data');
-      await fs.mkdir(dataPath, { recursive: true });
-      
-      // 记录到注册表
-      const skillPackage: SkillPackage = {
-        manifest,
-        path: clawhubPath, // 使用实际路径
-        status: 'installed',
-        installedAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      
-      this.installedSkills.set(manifest.id, skillPackage);
-      await this.saveSkillDb();
-      
-      return clawhubPath;
-    }
-    
-    // 创建目录
-    await fs.mkdir(skillPath, { recursive: true });
-    
-    if (options.link) {
-      // 开发模式：创建软链接
-      const entries = await fs.readdir(packagePath);
-      for (const entry of entries) {
-        const src = path.join(packagePath, entry);
-        const dest = path.join(skillPath, entry);
-        await fs.symlink(src, dest);
-      }
-    } else {
-      // 正常模式：复制文件
-      await this.copyDirectory(packagePath, skillPath);
-    }
-    
-    // 创建数据目录
-    const dataPath = path.join(skillPath, 'data');
-    await fs.mkdir(dataPath, { recursive: true });
-    
-    // 记录到注册表
-    const skillPackage: SkillPackage = {
-      manifest,
-      path: skillPath,
-      status: 'installed',
-      installedAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    
-    this.installedSkills.set(manifest.id, skillPackage);
-    await this.saveSkillDb();
-    
-    return skillPath;
-  }
-
-  /**
-   * 激活 Skill
-   */
-  private async activateSkill(skillId: string): Promise<void> {
-    const skill = this.installedSkills.get(skillId);
-    if (skill) {
-      skill.status = 'active';
-      skill.updatedAt = Date.now();
-      await this.saveSkillDb();
-    }
-  }
-
-  /**
-   * 停用 Skill
-   */
-  private async deactivateSkill(skillId: string): Promise<void> {
-    const skill = this.installedSkills.get(skillId);
-    if (skill) {
-      skill.status = 'disabled';
-      skill.updatedAt = Date.now();
-      await this.saveSkillDb();
-    }
-  }
-
-  /**
-   * 安装依赖
-   */
-  private async installDependency(dep: SkillPackage): Promise<void> {
-    const spec: InstallSpec = {
-      source: 'marketplace',
-      id: dep.manifest.id,
-      version: dep.manifest.version,
-    };
-    await this.install(spec);
-  }
-
-  /**
-   * 查找依赖此 Skill 的其他 Skill
-   */
-  private async findDependents(skillId: string): Promise<string[]> {
-    const dependents: string[] = [];
-    
-    for (const [id, skill] of this.installedSkills) {
-      if (skill.manifest.dependencies) {
-        const isDependent = skill.manifest.dependencies.some(
-          dep => dep.id === skillId
-        );
-        if (isDependent) {
-          dependents.push(id);
-        }
-      }
-    }
-    
-    return dependents;
-  }
-
-  /**
-   * 失败回滚
-   */
-  private async rollback(skillId: string): Promise<void> {
-    try {
-      const skillPath = path.join(this.userSkillsDir, skillId);
-      await fs.rm(skillPath, { recursive: true, force: true });
-      this.installedSkills.delete(skillId);
-      await this.saveSkillDb();
-    } catch (error) {
-      console.error('[InstallManager] Rollback failed:', error);
-    }
-  }
-
-  /**
-   * 事务回滚（供 InstallTransaction 使用）
-   */
-  async performTransactionRollback(
-    targetSkillId: string | null,
-    placedPaths: string[],
-    downloadedPaths: string[]
-  ): Promise<void> {
-    // 1. 删除已放置的文件
-    for (const placedPath of placedPaths) {
-      await fs.rm(placedPath, { recursive: true, force: true });
-    }
-
-    // 2. 删除目标 Skill（如果已注册）
-    if (targetSkillId) {
-      const skillPath = path.join(this.userSkillsDir, targetSkillId);
-      await fs.rm(skillPath, { recursive: true, force: true });
-      this.installedSkills.delete(targetSkillId);
-    }
-
-    // 3. 清理下载的临时文件
-    for (const downloadPath of downloadedPaths) {
-      if (!downloadPath.startsWith('/') && !downloadPath.startsWith('.')) {
-        await fs.rm(downloadPath, { recursive: true, force: true });
-      }
-    }
-
-    // 4. 保存数据库状态
-    await this.saveSkillDb();
-  }
-
-  /**
-   * 加载已安装的 Skill
-   */
-  private async loadInstalledSkills(): Promise<void> {
-    try {
-      const dbPath = path.join(this.skillDbPath, 'skills.json');
-      const content = await fs.readFile(dbPath, 'utf-8');
-      const data = JSON.parse(content);
-      
-      for (const [id, skill] of Object.entries(data.skills || {})) {
-        this.installedSkills.set(id, skill as SkillPackage);
-      }
-    } catch (error) {
-      // 数据库可能不存在，忽略
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        console.error('[InstallManager] Failed to load skill DB:', error);
-      }
-    }
-  }
-
-  /**
-   * 保存 Skill 数据库
-   */
-  private async saveSkillDb(): Promise<void> {
-    const dbPath = path.join(this.skillDbPath, 'skills.json');
-    const data = {
-      version: '1.2',
-      updatedAt: Date.now(),
-      skills: Object.fromEntries(this.installedSkills),
-    };
-    await fs.writeFile(dbPath, JSON.stringify(data, null, 2));
-  }
-
-  /**
-   * 复制目录
-   */
   private async copyDirectory(src: string, dest: string): Promise<void> {
     await fs.mkdir(dest, { recursive: true });
     const entries = await fs.readdir(src, { withFileTypes: true });
-    
     for (const entry of entries) {
       const srcPath = path.join(src, entry.name);
       const destPath = path.join(dest, entry.name);
-      
       if (entry.isDirectory()) {
         await this.copyDirectory(srcPath, destPath);
       } else {
@@ -824,57 +178,31 @@ export class InstallManager {
       }
     }
   }
-}
 
-/**
- * 安装事务
- * 保证安装流程的原子性
- */
-class InstallTransaction {
-  private committed = false;
-  private targetSkillId: string | null = null;
-  private downloadedPaths: string[] = [];
-  private placedPaths: string[] = [];
-  private installedDependencies: string[] = [];
-
-  setTargetSkill(skillId: string): void {
-    this.targetSkillId = skillId;
-  }
-
-  recordDownload(path: string): void {
-    this.downloadedPaths.push(path);
-  }
-
-  recordPlacement(path: string): void {
-    this.placedPaths.push(path);
-  }
-
-  recordDependency(skillId: string): void {
-    this.installedDependencies.push(skillId);
-  }
-
-  commit(): void {
-    this.committed = true;
-  }
-
-  async rollback(manager: InstallManager): Promise<boolean> {
-    if (this.committed) return true;
-
+  private async loadInstalledSkills(): Promise<void> {
     try {
-      console.log('[InstallTransaction] Rolling back...');
-      await manager.performTransactionRollback(
-        this.targetSkillId,
-        this.placedPaths,
-        this.downloadedPaths
-      );
-      console.log('[InstallTransaction] Rollback completed');
-      return true;
+      const dbPath = path.join(this.skillDbPath, 'skills.json');
+      const content = await fs.readFile(dbPath, 'utf-8');
+      const data = JSON.parse(content);
+      for (const [id, skill] of Object.entries(data.skills || {})) {
+        this.installedSkills.set(id, skill as SkillPackage);
+      }
     } catch (error) {
-      console.error('[InstallTransaction] Rollback failed:', error);
-      return false;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.error('[InstallManager] Failed to load skill DB:', error);
+      }
     }
   }
+
+  private async saveSkillDb(): Promise<void> {
+    const dbPath = path.join(this.skillDbPath, 'skills.json');
+    const data = {
+      version: '1.3-simple',
+      updatedAt: Date.now(),
+      skills: Object.fromEntries(this.installedSkills),
+    };
+    await fs.writeFile(dbPath, JSON.stringify(data, null, 2));
+  }
 }
 
-// 单例导出
 export const installManager = new InstallManager();

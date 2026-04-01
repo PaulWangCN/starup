@@ -1,18 +1,14 @@
 /**
- * 意图识别引擎
- * StarUp AI 系统的双层意图识别架构 - 网关层实现
+ * 意图识别引擎（简化版）
+ * 完全由 LLM 通过 Prompt 进行意图分类
  */
 
-// 导出核心类和类型
 export {
   IntentRouter,
   intentRouter,
   type IntentRecognition,
-  type IntentPattern,
-  type SkillIntentDef,
 } from './IntentRouter';
 
-// 导出工具函数
 export {
   calculateSimilarity,
   jaccardSimilarity,
@@ -28,7 +24,6 @@ export {
   calculateComplexity,
 } from './IntentUtils';
 
-// 导出模型路由
 export {
   ModelRouter,
   modelRouter,

@@ -1,6 +1,6 @@
 /**
- * StarUp AI 六层Prompt组装引擎
- * L1-L6 分层架构实现
+ * StarUp AI 六层Prompt组装引擎（简化版）
+ * L5 层直接读取 skills_index.md
  */
 
 import * as fs from 'fs/promises';
@@ -72,20 +72,17 @@ export class PromptAssembler {
    */
   async assemble(agentId: string, runtimeContext: RuntimeContext): Promise<AssembledPrompt> {
     const agentPath = this.getAgentPath(agentId);
-    
-    // 加载 L1-L3（文件层）
+
     const [layer1, layer2, layer3] = await Promise.all([
       this.loadLayer1(agentPath),
       this.loadLayer2(agentPath),
       this.loadLayer3(agentPath),
     ]);
 
-    // 生成 L4-L6（动态层）
     const layer4 = this.generateLayer4(this.toolRegistry.getAll());
-    const layer5 = this.generateLayer5(this.skillRegistry.getAll());
+    const layer5 = await this.loadLayer5();
     const layer6 = this.generateLayer6(runtimeContext);
 
-    // 组装完整Prompt
     const content = this.combineLayers([
       { name: 'L1_SOUL', content: layer1, required: true },
       { name: 'L2_IDENTITY', content: layer2, required: true },
@@ -109,7 +106,6 @@ export class PromptAssembler {
       },
     };
 
-    // 如果需要，执行压缩
     if (assembled.tokenCount > this.config.compression.threshold) {
       assembled = this.compressIfNeeded(assembled);
     }
@@ -117,104 +113,59 @@ export class PromptAssembler {
     return assembled;
   }
 
-  /**
-   * 获取Agent配置目录路径
-   */
   private getAgentPath(agentId: string): string {
     const homeDir = process.env.HOME || process.env.USERPROFILE || '.';
     return path.join(homeDir, '.starup', 'agents', agentId);
   }
 
-  /**
-   * 加载 L1: 基础身份 (SOUL.md)
-   * 核心人格、价值观、行为准则 - 需重启生效
-   */
   private async loadLayer1(agentPath: string): Promise<string> {
     const soulPath = path.join(agentPath, 'SOUL.md');
-    
     try {
-      // 检查缓存
       const cached = this.cache.get('soul');
-      if (cached && this.config.layers.soul.readonly) {
-        return cached.content;
-      }
-
+      if (cached && this.config.layers.soul.readonly) return cached.content;
       const content = await fs.readFile(soulPath, 'utf-8');
-      
-      // 计算hash验证完整性
       const hash = crypto.createHash('sha256').update(content).digest('hex');
       if (this.config.layers.soul.hash && this.config.layers.soul.hash !== hash) {
-        console.warn('[PromptAssembler] SOUL.md hash mismatch, using cached version');
         return cached?.content || content;
       }
-
-      // 由于是readonly，缓存内容
       this.cache.set('soul', { content, timestamp: Date.now() });
-      
       return this.wrapLayer('SOUL', content);
-    } catch (error) {
-      console.warn(`[PromptAssembler] Failed to load SOUL.md: ${error}`);
-      // 返回默认SOUL
+    } catch {
       return this.wrapLayer('SOUL', this.getDefaultSoul());
     }
   }
 
-  /**
-   * 加载 L2: 身份标识 (IDENTITY.md)
-   * 名称、表情符号、版本号 - 实时更新
-   */
   private async loadLayer2(agentPath: string): Promise<string> {
     const identityPath = path.join(agentPath, 'IDENTITY.md');
-    const cacheTtl = this.config.layers.identity.cache_ttl * 1000; // 转换为毫秒
-    
+    const cacheTtl = this.config.layers.identity.cache_ttl * 1000;
     try {
-      // 检查缓存是否有效
       const cached = this.cache.get('identity');
-      if (cached && Date.now() - cached.timestamp < cacheTtl) {
-        return cached.content;
-      }
-
+      if (cached && Date.now() - cached.timestamp < cacheTtl) return cached.content;
       const content = await fs.readFile(identityPath, 'utf-8');
       this.cache.set('identity', { content, timestamp: Date.now() });
-      
       return this.wrapLayer('IDENTITY', content);
-    } catch (error) {
-      console.warn(`[PromptAssembler] Failed to load IDENTITY.md: ${error}`);
+    } catch {
       return this.wrapLayer('IDENTITY', this.getDefaultIdentity());
     }
   }
 
-  /**
-   * 加载 L3: 用户画像 (USER.md)
-   * 用户偏好、历史记忆摘要 - 实时更新
-   */
   private async loadLayer3(agentPath: string): Promise<string> {
     const userPath = path.join(agentPath, 'USER.md');
-    
     try {
-      // USER层通常每次请求都刷新
       const content = await fs.readFile(userPath, 'utf-8');
-      
       if (this.config.layers.user_profile.auto_update) {
         this.cache.set('user_profile', { content, timestamp: Date.now() });
       }
-      
       return this.wrapLayer('USER_PROFILE', content);
-    } catch (error) {
-      // L3是可选层，可以不存在
+    } catch {
       return '';
     }
   }
 
-  /**
-   * 生成 L4: 工具定义
-   * 可用工具JSON Schema定义
-   */
   private generateLayer4(tools: ToolDefinition[]): string {
     if (!tools || tools.length === 0) {
       return this.wrapLayer('TOOLS', '当前没有可用工具。');
     }
-
     const toolSchemas = tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
@@ -241,112 +192,23 @@ export class PromptAssembler {
   }
 
   /**
-   * 生成 L5: 技能清单
-   * 当前加载的Skill目录与触发条件
+   * L5: 直接读取 skills_index.md
    */
-  private generateLayer5(skills: Skill[]): string {
-    // 添加内置 Meta-Skills 到列表
-    const allSkills = [...skills];
-    
-    // 添加 core.clawhub skill 描述（如果尚未加载）
-    const hasClawhubSkill = allSkills.some(s => s.id === 'core.clawhub');
-    if (!hasClawhubSkill) {
-      allSkills.push({
-        id: 'core.clawhub',
-        metadata: {
-          name: 'ClawHub 连接器',
-          description: '通过 ClawHub CLI 搜索、安装和管理 Skills。支持搜索 skill、安装 skill、查看详情、列出已安装、更新和卸载 skill 等功能。',
-          version: '1.0.0',
-          tools: ['clawhub_search', 'clawhub_install', 'clawhub_manage'],
-        },
-        content: '',
-        path: '',
-      } as Skill);
+  private async loadLayer5(): Promise<string> {
+    const indexPath = path.join(process.env.HOME || '.', '.starup', 'skills_index.md');
+    try {
+      let content = await fs.readFile(indexPath, 'utf-8');
+      // 防止 skills_index.md 过长导致上下文膨胀和截断
+      const maxChars = 8000;
+      if (content.length > maxChars) {
+        content = content.substring(0, maxChars) + '\n\n_...（内容已截断，更多 skill 请使用 /skills 查看）_';
+      }
+      return this.wrapLayer('SKILLS', content);
+    } catch {
+      return this.wrapLayer('SKILLS', '当前没有加载任何 skill。');
     }
-
-    if (allSkills.length === 0) {
-      return this.wrapLayer('SKILLS', '当前没有加载技能。');
-    }
-
-    const skillList = allSkills.map((skill, index) => {
-      const meta = skill.metadata;
-      return [
-        `## ${index + 1}. ${meta.name} (${skill.id})`,
-        `描述: ${meta.description}`,
-        `版本: ${meta.version || '1.0.0'}`,
-        meta.tools && meta.tools.length > 0 ? `所需工具: ${meta.tools.join(', ')}` : '',
-        '',
-      ].filter(Boolean).join('\n');
-    });
-
-    // ClawHub 使用指南
-    const clawhubGuide = `
-## ClawHub Skill 使用指南
-
-当用户需要搜索、安装或管理 Skills 时，使用 \`core.clawhub\` skill：
-
-### 搜索 Skill
-触发词："帮我找个...skill", "搜索...相关的 skill", "有没有...的工具"
-\`\`\`json
-{ "skill": "core.clawhub", "action": "search", "query": "关键词" }
-\`\`\`
-
-### 安装 Skill
-触发词："安装...skill", "帮我装...", "我要用..."
-\`\`\`json
-{ "skill": "core.clawhub", "action": "install", "skill_hint": "skill名称" }
-\`\`\`
-
-### 查看详情
-触发词："...skill是干嘛的", "介绍一下...", "查看...详情"
-\`\`\`json
-{ "skill": "core.clawhub", "action": "info", "skill_id": "skill名称" }
-\`\`\`
-
-### 列出已安装
-触发词："我装了哪些skill", "列出已安装的"
-\`\`\`json
-{ "skill": "core.clawhub", "action": "list" }
-\`\`\`
-
-### 更新 Skill
-触发词："更新所有skill", "把...更新到最新"
-\`\`\`json
-{ "skill": "core.clawhub", "action": "update", "skill_id": "skill名称" }
-\`\`\`
-
-### 卸载 Skill
-触发词："卸载...skill", "删除..."
-\`\`\`json
-{ "skill": "core.clawhub", "action": "uninstall", "skill_id": "skill名称" }
-\`\`\`
-
-### 探索推荐
-触发词："有什么推荐的skill", "看看热门工具"
-\`\`\`json
-{ "skill": "core.clawhub", "action": "explore" }
-\`\`\`
-`;
-
-    const content = [
-      '# 已加载技能',
-      '',
-      `当前系统已加载 ${allSkills.length} 个技能：`,
-      '',
-      ...skillList,
-      '',
-      clawhubGuide,
-      '',
-      '当用户请求与某个技能描述匹配时，你可以调用该技能来提供专业服务。',
-    ].join('\n');
-
-    return this.wrapLayer('SKILLS', content);
   }
 
-  /**
-   * 生成 L6: 运行时上下文
-   * 当前时间、活跃会话数、系统状态
-   */
   private generateLayer6(context: RuntimeContext): string {
     const date = new Date(context.timestamp);
     const content = [
@@ -362,34 +224,24 @@ export class PromptAssembler {
       `- 活跃会话数: ${context.activeSessions}`,
       `- 内存使用: ${Math.round(context.memoryUsage.used / 1024 / 1024)}MB / ${Math.round(context.memoryUsage.total / 1024 / 1024)}MB`,
       `- 请求ID: ${context.requestId}`,
-      '',
-      '## 注意事项',
-      '- 请根据当前时间合理安排任务',
-      '- 注意系统资源使用情况',
     ].join('\n');
 
     return this.wrapLayer('RUNTIME_CONTEXT', content);
   }
 
-  /**
-   * 组合所有层
-   */
   private combineLayers(layers: { name: string; content: string; required: boolean }[]): string {
-    const validLayers = layers.filter(l => l.content && l.content.trim().length > 0);
-    
+    const validLayers = layers.filter((l) => l.content && l.content.trim().length > 0);
     const header = [
       '# StarUp AI 系统提示词',
       '',
       `版本: ${this.config.version}`,
       `生成时间: ${new Date().toISOString()}`,
-      `包含层: ${validLayers.map(l => l.name).join(', ')}`,
+      `包含层: ${validLayers.map((l) => l.name).join(', ')}`,
       '',
       '---',
       '',
     ].join('\n');
-
-    const body = validLayers.map(l => l.content).join('\n\n');
-
+    const body = validLayers.map((l) => l.content).join('\n\n');
     const footer = [
       '',
       '---',
@@ -398,28 +250,23 @@ export class PromptAssembler {
       '你是一个AI助手，请根据以上所有层的信息来理解和回应用户的请求。',
       '请保持与你身份一致的人格和风格，并善用可用的工具和技能。',
       '',
+      '## 工具使用优先级',
+      '1. 如果某个 skill 已经安装并提供了专门工具（如 web_search、weather），必须优先使用该专门工具，**禁止**用 exec 工具自行模拟实现相同功能。',
+      '2. 调用工具时，请在回复开头明确说明你要调用哪个工具/来源（例如："我调用 web_search 工具来搜索..."）。',
+      '3. exec 仅用于本地系统命令（如 ls、cat、dir），不应用于替代已安装的 skill。',
+      '',
     ].join('\n');
-
     return header + body + footer;
   }
 
-  /**
-   * 包装层内容
-   */
   private wrapLayer(layerName: string, content: string): string {
-    if (!content || content.trim().length === 0) {
-      return '';
-    }
+    if (!content || content.trim().length === 0) return '';
     return `<!-- LAYER: ${layerName} -->\n\n${content}\n\n<!-- END ${layerName} -->`;
   }
 
-  /**
-   * 将参数定义转换为JSON Schema
-   */
   private convertParametersToSchema(parameters: ToolParameter[]): Record<string, any> {
     const properties: Record<string, any> = {};
     const required: string[] = [];
-
     for (const param of parameters) {
       properties[param.name] = {
         type: param.type,
@@ -432,38 +279,18 @@ export class PromptAssembler {
         required.push(param.name);
       }
     }
-
-    return {
-      type: 'object',
-      properties,
-      required,
-    };
+    return { type: 'object', properties, required };
   }
 
-  /**
-   * 估算token数量
-   * 简单估算: 每个token约4个字符
-   */
   private estimateTokens(text: string): number {
-    // 中文字符通常一个字符就是一个token或更多
     const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
     const otherChars = text.length - chineseChars;
-    
-    // 中文字符按1:1.5估算，其他按4:1估算
     return Math.ceil(chineseChars * 1.5 + otherChars / 4);
   }
 
-  /**
-   * 当token超过阈值时压缩Prompt
-   */
   private compressIfNeeded(prompt: AssembledPrompt): AssembledPrompt {
     const { threshold, strategy } = this.config.compression;
-    const excess = prompt.tokenCount - threshold;
-    
-    console.log(`[PromptAssembler] Prompt exceeds threshold (${prompt.tokenCount} > ${threshold}), applying ${strategy} compression`);
-
     let compressedContent = prompt.content;
-
     switch (strategy) {
       case 'truncate':
         compressedContent = this.truncatePrompt(prompt.content, threshold);
@@ -476,7 +303,6 @@ export class PromptAssembler {
         compressedContent = this.hybridCompress(prompt.content, threshold);
         break;
     }
-
     return {
       ...prompt,
       content: compressedContent,
@@ -484,82 +310,51 @@ export class PromptAssembler {
     };
   }
 
-  /**
-   * 截断策略：保留必要层，截断可选层
-   */
   private truncatePrompt(content: string, threshold: number): string {
-    // 解析各层
     const layerPattern = /<!-- LAYER: (\w+) -->\n\n([\s\S]*?)\n\n<!-- END \w+ -->/g;
     const layers: { name: string; content: string; priority: number }[] = [];
-    
     let match;
     while ((match = layerPattern.exec(content)) !== null) {
       const name = match[1];
       const layerContent = match[0];
-      // 优先级: L1和L2最高，L6次之，其他较低
       let priority = 1;
       if (name === 'L1_SOUL' || name === 'L2_IDENTITY') priority = 3;
       else if (name === 'L6_RUNTIME') priority = 2;
-      
       layers.push({ name, content: layerContent, priority });
     }
-
-    // 按优先级排序
     layers.sort((a, b) => b.priority - a.priority);
-
-    // 逐步移除低优先级层
     let result = content;
     let currentTokens = this.estimateTokens(result);
-    
     for (const layer of layers) {
       if (currentTokens <= threshold) break;
-      if (layer.priority >= 3) continue; // 不删除高优先级层
-      
+      if (layer.priority >= 3) continue;
       result = result.replace(layer.content, `<!-- ${layer.name} truncated -->`);
       currentTokens = this.estimateTokens(result);
     }
-
     return result;
   }
 
-  /**
-   * 摘要策略：压缩长文本
-   */
   private summarizePrompt(content: string): string {
-    // 简化实现：移除所有markdown格式，保留纯文本
     return content
-      .replace(/<!--[\s\S]*?-->/g, '') // 移除HTML注释
-      .replace(/```[\s\S]*?```/g, '[代码块]') // 简化代码块
-      .replace(/#+ /g, '') // 移除标题标记
-      .replace(/\n{3,}/g, '\n\n') // 压缩多余空行
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/```[\s\S]*?```/g, '[代码块]')
+      .replace(/#+ /g, '')
+      .replace(/\n{3,}/g, '\n\n')
       .trim();
   }
 
-  /**
-   * 混合策略：结合截断和摘要
-   */
   private hybridCompress(content: string, threshold: number): string {
-    // 先尝试摘要
     let result = this.summarizePrompt(content);
-    
-    // 如果仍然超限，再截断
     if (this.estimateTokens(result) > threshold) {
       result = this.truncatePrompt(result, threshold);
     }
-    
     return result;
   }
 
-  /**
-   * 获取默认SOUL内容（应急fallback，正常情况下应该从文件读取）
-   */
   private getDefaultSoul(): string {
     return '[SOUL] 等待初始化 - 请检查 ~/.starup/agents/default/SOUL.md';
   }
 
-  /**
-   * 获取默认IDENTITY内容
-   */
   private getDefaultIdentity(): string {
     return [
       '# 身份标识',
@@ -575,46 +370,23 @@ export class PromptAssembler {
     ].join('\n');
   }
 
-  /**
-   * 清空缓存
-   */
   clearCache(): void {
     this.cache.clear();
-    console.log('[PromptAssembler] Cache cleared');
   }
 
-  /**
-   * 更新配置
-   */
   updateConfig(config: Partial<PromptLayerConfig>): void {
     this.config = { ...this.config, ...config };
-    console.log('[PromptAssembler] Configuration updated');
   }
 }
 
-// ==================== 默认配置工厂 ====================
-
 export function createDefaultConfig(): PromptLayerConfig {
   return {
-    version: '1.0.0',
+    version: '1.3-simple',
     layers: {
-      soul: {
-        path: 'SOUL.md',
-        hash: '',
-        readonly: true,
-      },
-      identity: {
-        path: 'IDENTITY.md',
-        cache_ttl: 60, // 60秒缓存
-      },
-      user_profile: {
-        path: 'USER.md',
-        auto_update: true,
-      },
+      soul: { path: 'SOUL.md', hash: '', readonly: true },
+      identity: { path: 'IDENTITY.md', cache_ttl: 60 },
+      user_profile: { path: 'USER.md', auto_update: true },
     },
-    compression: {
-      threshold: 8192, // 8k tokens
-      strategy: 'hybrid',
-    },
+    compression: { threshold: 8192, strategy: 'hybrid' },
   };
 }

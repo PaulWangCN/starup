@@ -6,8 +6,8 @@ StarUp 是一个 AI 助手运行时环境与集成平台，采用模块化架构
 
 - **主会话和子代理架构**：支持任务分解和并行处理
 - **六层 Prompt 工程化体系**（v1.1）：SOUL → IDENTITY → USER → TOOLS → SKILLS → RUNTIME
-- **双层意图识别引擎**（v1.1）：网关层规则匹配 + Skill 层语义匹配
-- **Skill 生态系统**（v1.2）：开放式 Skill 动态发现、安全安装与热插拔管理
+- **LLM 意图识别**（v1.3-simple）：完全由大模型通过 Prompt 判断意图，不使用正则，覆盖日常生活 80% 场景
+- **Skill 生态系统**（v1.3-simple）：启动扫描 + 定时扫描发现 skill，汇总写入 `skills_index.md`，大模型通过读取该文件了解可用 skill
 - **Meta-Skill 自举架构**（v1.3）："用 Skill 管理 Skill"的递归设计，支持意图驱动的自然语言安装
 - **多平台连接器**：飞书、微信等 IM 平台集成
 
@@ -71,32 +71,54 @@ starup/
 | IntentRouter | `core/intent/IntentRouter.ts` | 意图识别与路由 |
 | ContextManager | `core/session/ContextManager.ts` | 上下文继承管理 |
 
-### v1.2 Skill 生态系统
+### v1.3-simple Skill 生态系统（大道至简版）
 
 | 模块 | 路径 | 说明 |
 |------|------|------|
-| InstallManager | `core/skills/InstallManager.ts` | 多源 Skill 安装管理 |
-| SkillRuntime | `core/skills/SkillRuntime.ts` | VM 热插拔运行时 |
-| DependencyResolver | `core/skills/DependencyResolver.ts` | SAT 依赖求解 |
-| Sandbox | `core/skills/Sandbox.ts` | Capability 权限沙箱 |
+| SkillRegistry | `core/skills/SkillRegistry.ts` | 扫描 skills 目录，加载工具定义，生成 `skills_index.md` |
+| InstallManager | `core/skills/InstallManager.ts` | 简化版安装管理：目录复制/删除，无事务/签名/依赖解析 |
+| SkillRuntime | `core/skills/SkillRuntime.ts` | 占位符，VM/热插拔已移除 |
 | PackageDownloader | `core/install/PackageDownloader.ts` | 多源包下载 |
-| SignatureVerifier | `core/install/SignatureVerifier.ts` | Ed25519 签名验证 |
 
 ### v1.3 Meta-Skill & SkillHub
 
 | 模块 | 路径 | 说明 |
 |------|------|------|
-| SkillHubClient | `core/skills/SkillHubClient.ts` | 多源 Hub 搜索客户端 |
-| MetaInstallerSkill | `core/skills/MetaInstallerSkill.ts` | core.installer，处理安装/卸载 |
-| MetaRegistrySkill | `core/skills/MetaRegistrySkill.ts` | core.registry，Hub/本地索引查询 |
-| MetaUpdaterSkill | `core/skills/MetaUpdaterSkill.ts` | core.updater，版本检查与升级 |
-| IntentRouter | `core/intent/IntentRouter.ts` | 扩展 skill_* 意图识别与路由 |
+| SkillHubClient | `core/skills/SkillHubClient.ts` | 多源 Hub 搜索客户端（保留，暂不活跃使用） |
+| MetaInstallerSkill | `core/skills/MetaInstallerSkill.ts` | core.installer，处理安装/卸载（简化版） |
+| MetaRegistrySkill | `core/skills/MetaRegistrySkill.ts` | core.registry，Hub/本地索引查询（简化版） |
+| MetaUpdaterSkill | `core/skills/MetaUpdaterSkill.ts` | core.updater，版本检查与升级（简化版） |
+| IntentRouter | `core/intent/IntentRouter.ts` | 纯 LLM Prompt 意图识别，无正则 |
 
 ### v1.3.1 SkillHub 集成修复
 
 | 模块 | 路径 | 说明 |
 |------|------|------|
 | SkillhubCLI | `core/skills/SkillhubCLI.ts` | 腾讯 SkillHub CLI 集成 |
+
+## 架构简化说明（v1.3-simple）
+
+### Skill 发现机制
+1. `SkillRegistry.initialize()` 启动时扫描 `~/.starup/skills/` 和内置 `skills/` 目录
+2. 对每个 skill 目录，读取 `manifest.yaml` + `PROMPT.md`（或 `SKILL.md`）
+3. 如果目录下有 `index.js`，加载并注册其中导出的 `tools` 到 `ToolRegistry`
+4. 汇总所有 skill 信息写入 `~/.starup/skills_index.md`
+5. 每 30 秒自动重新扫描一次
+6. `PromptAssembler` 的 L5 层直接读取 `skills_index.md` 嵌入到 system prompt
+
+### 意图识别机制
+1. `IntentRouter` 完全移除了正则表达式匹配
+2. 构造专门的分类 Prompt，调用 LLM 判断意图
+3. 意图类别覆盖：general_chat, use_skill, system_cmd, code_help, memory_query
+4. 分类结果用于注入用户消息上下文，帮助 LLM 理解需求
+
+### 已移除的复杂功能
+- VM 热插拔运行时（SkillRuntime 中的 VM/Worker）
+- SAT 依赖求解器（DependencyResolver 保留文件但不再被 InstallManager 使用）
+- 原子事务安装（InstallTransaction）
+- 签名验证（SignatureVerifier 保留文件但不再被 InstallManager 使用）
+- 蓝绿部署升级
+- Capability 沙箱的复杂拦截逻辑
 
 ## 开发规范
 
