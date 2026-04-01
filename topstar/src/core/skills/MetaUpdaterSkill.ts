@@ -6,7 +6,7 @@ import {
   UpgradeResult,
 } from '../../types';
 import { installManager } from './InstallManager';
-import { skillHubClient } from './SkillHubClient';
+import { clawhubConnector } from './ClawhubConnector';
 import { metaRegistrySkill } from './MetaRegistrySkill';
 
 /**
@@ -64,9 +64,9 @@ export class MetaUpdaterSkill implements MetaSkill {
 
     const currentVersion = skill.manifest.version;
 
-    // 搜索 Hub 获取最新版本
-    const results = await skillHubClient.search({ query: skillId });
-    const match = results.find(r => r.id === skillId);
+    // 搜索 ClawHub 获取最新版本
+    const clawhubResults = await clawhubConnector.search(skillId, { limit: 10 });
+    const match = clawhubResults.skills.find(s => s.slug === skillId);
 
     if (!match) {
       return { hasUpdate: false, currentVersion, latestVersion: currentVersion };

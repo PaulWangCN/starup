@@ -1,25 +1,43 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import axios from 'axios';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
+import * as os from 'os';
 
 const execAsync = promisify(exec);
 
 /**
  * 包下载器
  * 支持从 Marketplace、Git、URL 等多种来源下载 Skill 包
+ * v1.3.2: 优先使用 clawhub CLI 安装
  */
 export class PackageDownloader {
   private cachePath: string;
+  private clawhubPath: string;
 
   constructor(cachePath: string) {
     this.cachePath = cachePath;
+    this.clawhubPath = path.join(process.cwd(), 'node_modules', '.bin', 'clawhub');
+  }
+
+  /**
+   * 检查 clawhub CLI 是否可用
+   * Windows 上使用 npx
+   */
+  async isClawhubAvailable(): Promise<boolean> {
+    try {
+      const cmd = process.platform === 'win32' ? 'npx clawhub --help' : `${this.clawhubPath} --help`;
+      await execAsync(cmd, { cwd: process.cwd() });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**
    * 从 Marketplace 下载
-   * v1.3.1: 支持多 registry 尝试（SkillHub, ClawHub, 本地）
+   * v1.3.2: 优先使用 clawhub CLI，回退到 HTTP registry
    */
   async downloadFromMarketplace(
     id: string,
@@ -47,6 +65,20 @@ export class PackageDownloader {
         return cachedPath;
       } catch {
         throw new Error(`Offline mode: package ${cacheKey} not in cache`);
+      }
+    }
+
+    // v1.3.2: 优先尝试使用 clawhub CLI
+    if (await this.isClawhubAvailable()) {
+      try {
+        console.log(`[PackageDownloader] Trying clawhub CLI...`);
+        const skillPath = await this.downloadViaClawhub(id, version);
+        if (skillPath) {
+          return skillPath;
+        }
+      } catch (error) {
+        console.warn(`[PackageDownloader] clawhub CLI failed: ${error}`);
+        // 继续尝试 HTTP registry
       }
     }
 
@@ -108,6 +140,70 @@ export class PackageDownloader {
 
     // 所有 registry 都失败
     throw lastError || new Error('All registries failed to download the package');
+  }
+
+  /**
+   * 使用 clawhub CLI 下载/安装 skill
+   * v1.3.2: Windows 使用 npx，Unix 使用直接路径
+   */
+  private async downloadViaClawhub(id: string, version?: string): Promise<string | null> {
+    const skillsDir = path.join(process.cwd(), 'skills');
+    const targetPath = path.join(skillsDir, id);
+
+    try {
+      // 检查是否已安装
+      try {
+        await fs.access(targetPath);
+        console.log(`[PackageDownloader] Skill ${id} already installed via clawhub at ${targetPath}`);
+        return this.createClawhubMarker(id, version || 'latest', targetPath);
+      } catch {
+        // 未安装，继续
+      }
+
+      // 使用 npx clawhub install (跨平台)
+      const cmd = process.platform === 'win32' 
+        ? `npx clawhub install ${version && version !== 'latest' ? '--version ' + version : ''} ${id}`
+        : `${this.clawhubPath} install ${version && version !== 'latest' ? '--version ' + version : ''} ${id}`;
+      
+      console.log(`[PackageDownloader] Running: ${cmd}`);
+
+      const { stdout, stderr } = await execAsync(cmd, {
+        cwd: process.cwd(),
+        timeout: 120000,
+      });
+
+      console.log(`[PackageDownloader] clawhub output:`, stdout);
+      if (stderr) {
+        console.warn(`[PackageDownloader] clawhub stderr:`, stderr);
+      }
+
+      // 验证安装成功
+      await fs.access(targetPath);
+      console.log(`[PackageDownloader] Successfully installed ${id} via clawhub to ${targetPath}`);
+
+      return this.createClawhubMarker(id, version || 'latest', targetPath);
+    } catch (error) {
+      console.error(`[PackageDownloader] clawhub install failed: ${error}`);
+      return null;
+    }
+  }
+
+  /**
+   * 创建 clawhub 标记文件
+   */
+  private async createClawhubMarker(id: string, version: string, targetPath: string): Promise<string> {
+    const clawPath = path.join(this.cachePath, id, `${version}.claw`);
+    await fs.mkdir(path.dirname(clawPath), { recursive: true });
+    
+    // 创建一个指向安装目录的标记文件
+    await fs.writeFile(clawPath, JSON.stringify({ 
+      source: 'clawhub', 
+      path: targetPath,
+      id,
+      version,
+    }));
+
+    return clawPath;
   }
 
   /**

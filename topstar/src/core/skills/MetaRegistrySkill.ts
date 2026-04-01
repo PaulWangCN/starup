@@ -9,8 +9,7 @@ import {
   SkillCandidate,
   SkillPackage,
 } from '../../types';
-import { skillHubClient } from './SkillHubClient';
-import { skillhubCLI } from './SkillhubCLI';
+import { clawhubConnector } from './ClawhubConnector';
 import { installManager } from './InstallManager';
 
 /**
@@ -41,7 +40,6 @@ export class MetaRegistrySkill implements MetaSkill {
    * 初始化
    */
   async initialize(): Promise<void> {
-    await skillHubClient.initialize();
     await this.loadLocalIndex();
     console.log('[MetaRegistrySkill] Initialized');
   }
@@ -71,25 +69,23 @@ export class MetaRegistrySkill implements MetaSkill {
 
   /**
    * 搜索 Skill
-   * v1.3.1: 优先使用 SkillHub CLI 搜索
+   * v1.3.2: 仅使用 ClawHub Connector 搜索
    */
   async search(request: SkillSearchRequest): Promise<SkillSearchResult[]> {
-    let results: SkillSearchResult[] = [];
+    // 使用 ClawHub 搜索
+    console.log(`[MetaRegistrySkill] Searching ClawHub: ${request.query}`);
+    const clawhubResults = await clawhubConnector.search(request.query, { limit: 20 });
     
-    // 优先尝试使用 SkillHub CLI 搜索
-    const skillhubInstalled = await skillhubCLI.isInstalled();
-    if (skillhubInstalled) {
-      console.log(`[MetaRegistrySkill] Using SkillHub CLI to search: ${request.query}`);
-      const cliResults = await skillhubCLI.search(request.query);
-      if (cliResults.length > 0) {
-        results = cliResults;
-      }
-    }
-    
-    // 如果 CLI 没有结果，使用 HTTP API 搜索
-    if (results.length === 0) {
-      results = await skillHubClient.search(request);
-    }
+    const results: SkillSearchResult[] = clawhubResults.skills.map(s => ({
+      id: s.slug,
+      name: s.name,
+      version: s.version || 'latest',
+      description: s.description,
+      manifest_digest: '',
+      capabilities_preview: s.tags || [],
+      source_hub: 'clawhub',
+      trusted: true,
+    }));
 
     // 补充本地安装信息
     for (const result of results) {
@@ -106,6 +102,7 @@ export class MetaRegistrySkill implements MetaSkill {
 
   /**
    * 解析模糊名称到精确 ID
+   * v1.3.2: 仅使用 ClawHub 搜索
    */
   async resolve(skillHint: string): Promise<SkillCandidate[]> {
     // 1. 先检查本地精确匹配
@@ -120,11 +117,17 @@ export class MetaRegistrySkill implements MetaSkill {
       }];
     }
 
-    // 2. 搜索 Hub
-    const hubResults = await skillHubClient.resolveFuzzyName(skillHint);
+    // 2. 搜索 ClawHub
+    const clawhubResults = await clawhubConnector.search(skillHint, { limit: 10 });
 
     // 3. 按相关度排序
-    return hubResults.sort((a, b) => {
+    return clawhubResults.skills.map(s => ({
+      id: s.slug,
+      name: s.name,
+      version: s.version || 'latest',
+      description: s.description,
+      source_hub: 'clawhub',
+    })).sort((a, b) => {
       const aExact = a.name.toLowerCase() === skillHint.toLowerCase() || a.id.toLowerCase() === skillHint.toLowerCase();
       const bExact = b.name.toLowerCase() === skillHint.toLowerCase() || b.id.toLowerCase() === skillHint.toLowerCase();
       if (aExact && !bExact) return -1;

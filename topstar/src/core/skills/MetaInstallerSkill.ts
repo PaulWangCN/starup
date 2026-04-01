@@ -15,8 +15,7 @@ import {
 import { installManager } from './InstallManager';
 import { skillRuntime } from './SkillRuntime';
 import { metaRegistrySkill } from './MetaRegistrySkill';
-import { skillHubClient } from './SkillHubClient';
-import { skillhubCLI } from './SkillhubCLI';
+import { clawhubConnector, ClawhubSkill } from './ClawhubConnector';
 
 import { intentRouter } from '../intent/IntentRouter';
 
@@ -41,7 +40,9 @@ export class MetaInstallerSkill implements MetaSkill {
   private pendingConfirmations: Map<string,
     | { type: 'disambiguation'; data: { intent: InstallIntent; candidates: SkillCandidate[] } }
     | { type: 'capability'; data: { skillId: string; version: string; intent: InstallIntent; manifest: SkillManifest } }
-    | { type: 'install'; data: any }
+    | { type: 'install_confirm'; data: { skill: ClawhubSkill; version: string; intent: InstallIntent; manifest: SkillManifest } }
+    | { type: 'install_select'; data: { skills: ClawhubSkill[]; version: string; intent: InstallIntent } }
+    | { type: 'general'; data: any }
   > = new Map();
 
   /**
@@ -143,37 +144,125 @@ export class MetaInstallerSkill implements MetaSkill {
     intent: InstallIntent,
     context: SessionContext
   ): Promise<ActionResult> {
-    // 3.1 获取 manifest 预览权限
-    const manifest = await skillHubClient.fetchManifest(skillId, version, intent.source_hub);
-    if (!manifest) {
+    // v1.3.2: 安装前先在 ClawHub 搜索确认存在性
+    console.log(`[MetaInstallerSkill] Searching for ${skillId} on ClawHub before install...`);
+    
+    const searchResult = await clawhubConnector.search(skillId, { limit: 10 });
+    
+    // 1. 没有找到任何结果
+    if (searchResult.skills.length === 0) {
       return {
         success: false,
-        message: `无法获取 ${skillId}@${version} 的 manifest`,
+        message: `❌ 未找到名为 "${skillId}" 的 Skill。\n\n` +
+          `请确认名称是否正确，或使用以下命令搜索相关 Skill：\n` +
+          `  startup skillhub search ${skillId}`,
       };
     }
 
-    // 3.2 权限预览（高危权限需要确认）
-    const highRiskPerms = this.extractHighRiskPermissions(manifest);
-    if (highRiskPerms.length > 0) {
-      const confirmationId = this.createConfirmationId();
-      this.pendingConfirmations.set(confirmationId, {
-        type: 'capability',
-        data: { skillId, version, intent, manifest },
-      });
+    // 2. 精确匹配（slug 完全匹配）
+    const exactMatch = searchResult.skills.find(s => s.slug === skillId);
+    
+    // 3. 如果有精确匹配，检查是否有多个同名不同源的
+    const nameMatches = searchResult.skills.filter(s => 
+      s.slug === skillId || s.name.toLowerCase() === skillId.toLowerCase()
+    );
 
-      return {
-        success: true,
-        message: `Skill "${manifest.name}" 申请以下权限，是否继续安装？\n` +
-          highRiskPerms.map(p => `- ${p.name}: ${p.description} [风险等级: ${p.risk_level}]`).join('\n'),
-        requires_confirmation: true,
-        confirmation_type: 'capability',
-        capabilities: highRiskPerms,
-        data: { confirmation_id: confirmationId },
-      };
+    // 4. 只有一个精确匹配：显示详情让用户确认
+    if (exactMatch && nameMatches.length === 1) {
+      return this.confirmInstallSingle(exactMatch, version, intent);
     }
 
-    // 3.3 执行实际安装
-    return this.performInstallation(skillId, version, intent, manifest);
+    // 5. 多个匹配：让用户选择
+    if (nameMatches.length > 1 || (!exactMatch && searchResult.skills.length > 0)) {
+      return this.askUserToSelectSkill(searchResult.skills, skillId, version, intent);
+    }
+
+    // 6. 其他情况（理论上不会到这里）
+    return {
+      success: false,
+      message: `❌ 无法确定要安装的 Skill。\n\n` +
+        `找到 ${searchResult.skills.length} 个相关结果，但没有精确匹配。\n` +
+        `请使用以下命令查看详情：\n` +
+        `  startup skillhub search ${skillId}`,
+    };
+  }
+
+  /**
+   * 确认安装单个 skill
+   */
+  private async confirmInstallSingle(
+    skill: ClawhubSkill,
+    version: string,
+    intent: InstallIntent
+  ): Promise<ActionResult> {
+    const confirmationId = this.createConfirmationId();
+    
+    // 创建临时的 manifest 用于权限检查
+    const tempManifest: SkillManifest = {
+      id: skill.slug,
+      name: skill.name,
+      version: skill.version || 'latest',
+      api_version: '1.2',
+      author: skill.author,
+      license: 'unknown',
+      description: skill.description,
+      runtime: { type: 'javascript', entry: 'index.js' },
+      permissions: [],
+    };
+
+    this.pendingConfirmations.set(confirmationId, {
+      type: 'install_confirm',
+      data: { skill, version, intent, manifest: tempManifest },
+    });
+
+    return {
+      success: true,
+      message: `📦 找到 Skill：${skill.name}\n\n` +
+        `slug: ${skill.slug}\n` +
+        `描述: ${skill.description}\n` +
+        `版本: ${skill.version || 'latest'}\n\n` +
+        `确认安装吗？（回复 "确认" 或 "是" 继续）`,
+      requires_confirmation: true,
+      confirmation_type: 'general',
+      data: { confirmation_id: confirmationId },
+    };
+  }
+
+  /**
+   * 让用户从多个 skill 中选择
+   */
+  private async askUserToSelectSkill(
+    skills: ClawhubSkill[],
+    originalHint: string,
+    version: string,
+    intent: InstallIntent
+  ): Promise<ActionResult> {
+    const confirmationId = this.createConfirmationId();
+    
+    this.pendingConfirmations.set(confirmationId, {
+      type: 'install_select',
+      data: { skills, version, intent },
+    });
+
+    const list = skills.slice(0, 5).map((s, i) => 
+      `${i + 1}. ${s.name}\n   slug: ${s.slug}\n   ${s.description}`
+    ).join('\n\n');
+
+    return {
+      success: true,
+      message: `🔍 找到多个相关 Skill（搜索: "${originalHint}"）：\n\n${list}\n\n` +
+        `请回复数字 1-${Math.min(skills.length, 5)} 选择要安装的 Skill，或回复 "取消" 放弃安装。`,
+      requires_confirmation: true,
+      confirmation_type: 'disambiguation',
+      candidates: skills.slice(0, 5).map(s => ({
+        id: s.slug,
+        name: s.name,
+        version: s.version || 'latest',
+        description: s.description,
+        source_hub: 'clawhub',
+      })),
+      data: { confirmation_id: confirmationId },
+    };
   }
 
   private async performInstallation(
@@ -183,36 +272,7 @@ export class MetaInstallerSkill implements MetaSkill {
     manifest: SkillManifest
   ): Promise<ActionResult> {
     try {
-      // v1.3.1: 优先尝试使用腾讯 SkillHub CLI 安装
-      const skillhubInstalled = await skillhubCLI.isInstalled();
-      
-      if (skillhubInstalled) {
-        console.log(`[MetaInstallerSkill] Using SkillHub CLI to install ${skillId}`);
-        const result = await skillhubCLI.install(skillId, version);
-        
-        if (result.success) {
-          // 尝试从 SkillHub 安装目录加载
-          await this.loadSkillFromSkillHub(skillId);
-          
-          return {
-            success: true,
-            message: `已通过 SkillHub 成功安装 ${skillId}${version ? '@' + version : ''}，现在你可以使用相关功能了。`,
-            data: {
-              skill_id: skillId,
-              version: version || 'latest',
-              name: manifest.name,
-              installed_via: 'skillhub',
-            },
-          };
-        } else {
-          // SkillHub 安装失败，回退到内部 InstallManager
-          console.log(`[MetaInstallerSkill] SkillHub install failed, falling back to internal installer`);
-        }
-      } else {
-        console.log(`[MetaInstallerSkill] SkillHub CLI not found, using internal installer`);
-      }
-
-      // 使用内部 InstallManager 安装
+      // v1.3.2: 使用 InstallManager 安装（PackageDownloader 内部已集成 clawhub）
       const spec: InstallSpec = {
         source: 'marketplace',
         id: skillId,
@@ -229,17 +289,18 @@ export class MetaInstallerSkill implements MetaSkill {
       const result = await installManager.install(spec, options);
 
       if (!result.success) {
-        // 安装失败，返回明确的错误信息
+        // 安装失败，尝试搜索相似 skill 建议
+        const suggestions = await this.searchSimilarSkills(skillId);
+        
+        let suggestionText = '';
+        if (suggestions.length > 0) {
+          suggestionText = '\n\n💡 你是否想找:\n' + suggestions.map(s => `  - ${s}`).join('\n');
+        }
+
         return {
           success: false,
-          message: `❌ 安装失败: ${result.message}\n\n` +
-            `系统已尝试以下安装方式但都未成功：\n` +
-            `1. SkillHub CLI (skillhub install)\n` +
-            `2. Tencent SkillHub (https://skillhub.tencent.com/)\n` +
-            `3. ClawHub (https://clawhub.ai/)\n\n` +
-            `💡 建议解决方案：\n` +
-            `- 安装 SkillHub CLI: curl -fsSL https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/install/install.sh | bash -s -- --cli-only\n` +
-            `- 或访问 https://skillhub.tencent.com/ 手动下载安装`,
+          message: `❌ 安装失败: ${result.message}${suggestionText}\n\n` +
+            `请确认 skill 名称正确，或尝试搜索相关 skill。`,
           error: result.error,
         };
       }
@@ -260,7 +321,7 @@ export class MetaInstallerSkill implements MetaSkill {
 
       return {
         success: true,
-        message: `已成功安装 ${skillId}@${version}，现在你可以使用相关功能了。`,
+        message: `✅ 成功安装 ${skillId}@${version}，现在你可以使用相关功能了。`,
         data: {
           skill_id: skillId,
           version: version,
@@ -277,23 +338,14 @@ export class MetaInstallerSkill implements MetaSkill {
   }
 
   /**
-   * 尝试从 SkillHub 安装目录加载 Skill
+   * 搜索相似的 skills 作为建议
    */
-  private async loadSkillFromSkillHub(skillId: string): Promise<void> {
+  private async searchSimilarSkills(hint: string): Promise<string[]> {
     try {
-      // SkillHub 默认安装到当前 workspace 的 .skillhub 目录
-      const skillhubPath = path.join(process.cwd(), '.skillhub', skillId);
-      const fs = await import('fs/promises');
-      
-      try {
-        await fs.access(skillhubPath);
-        // TODO: 加载 SkillHub 安装的 skill 到运行时
-        console.log(`[MetaInstallerSkill] Found SkillHub installation at ${skillhubPath}`);
-      } catch {
-        // SkillHub 可能安装到了其他位置
-      }
+      const result = await clawhubConnector.search(hint, { limit: 5 });
+      return result.skills.map(s => s.slug);
     } catch {
-      // 忽略加载错误
+      return [];
     }
   }
 
@@ -385,9 +437,65 @@ export class MetaInstallerSkill implements MetaSkill {
         return this.executeInstall(selected.id, selected.version, intent, context);
       }
 
+      case 'install_select': {
+        const { skills, version, intent } = pending.data;
+        
+        let selected: ClawhubSkill;
+
+        if (typeof choice === 'number') {
+          selected = skills[choice - 1];
+        } else if (typeof choice === 'string') {
+          // 尝试解析数字
+          const numChoice = parseInt(choice, 10);
+          if (!isNaN(numChoice) && numChoice > 0 && numChoice <= skills.length) {
+            selected = skills[numChoice - 1];
+          } else {
+            // 尝试按 slug 或名称匹配
+            selected = skills.find(s => s.slug === choice || s.name === choice) || skills[0];
+          }
+        } else {
+          selected = skills[0];
+        }
+
+        if (!selected) {
+          return {
+            success: false,
+            message: '无效的选择',
+          };
+        }
+
+        // 选择后需要确认
+        return this.confirmInstallSingle(selected, version || 'latest', intent);
+      }
+
       case 'capability': {
         const { skillId, version, intent, manifest } = pending.data;
         return this.performInstallation(skillId, version, intent, manifest);
+      }
+
+      case 'install_confirm': {
+        const { skill, version, intent } = pending.data;
+        
+        // 用户确认安装单个 skill
+        if (choice === true || choice === 'yes' || choice === '确认' || choice === '是') {
+          const tempManifest: SkillManifest = {
+            id: skill.slug,
+            name: skill.name,
+            version: skill.version || version || 'latest',
+            api_version: '1.2',
+            author: skill.author,
+            license: 'unknown',
+            description: skill.description,
+            runtime: { type: 'javascript', entry: 'index.js' },
+            permissions: [],
+          };
+          return this.performInstallation(skill.slug, version || skill.version || 'latest', intent, tempManifest);
+        }
+        
+        return {
+          success: false,
+          message: '安装已取消',
+        };
       }
 
       default:

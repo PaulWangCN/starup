@@ -7,6 +7,7 @@ import { SessionManager, sessionManager } from './core/session/SessionManager';
 import { MemoryManager, memoryManager } from './core/memory/MemoryManager';
 import { ToolRegistry, toolRegistry } from './core/tools/ToolRegistry';
 import { skillRegistry } from './core/skills/SkillRegistry';
+import { metaClawhubSkill } from './core/skills/MetaClawhubSkill';
 import { LLMService } from './core/llm/LLMService';
 import { SystemConfig } from './types';
 
@@ -73,6 +74,9 @@ export class StarUpCore {
     
     // 初始化 SkillRegistry（包含 InstallManager 和 SkillRuntime）
     await this.skillRegistry.initialize();
+    
+    // 初始化 Meta-Clawhub Skill
+    await metaClawhubSkill.initialize();
     
     console.log('[StarUpCore] Initialization complete');
   }

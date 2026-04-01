@@ -633,6 +633,69 @@ export class IntentRouter {
       priority: 8,
     });
 
+    // 7. clawhub_search - 从 ClawHub 搜索 Skill
+    this.intentPatterns.set('clawhub_search', {
+      id: 'clawhub_search',
+      patterns: [
+        /(?:搜索|查找|找|有没有)(?:一个|一些)?(?:skill|技能|工具|插件)(?:可以|能|用来)?(.+?)(?:吗|么)?/,
+        /(?:推荐|介绍)(?:一些|几个|一个)?(?:好用的|不错的|实用的)?(?:skill|技能|工具|插件)/,
+        /(?:怎么|如何)(?:用|通过)(?:skill|技能|工具|插件)(?:来|去做|实现|完成)?/,
+        /(?:有没有|有没有哪个)(?:skill|技能|工具|插件)(?:可以|能|用来)?(.+)/,
+        /(?:帮我|给我)(?:找|搜索|推荐)(?:一个|一些)?(.+?)(?:的)?(?:skill|技能|工具|插件)/,
+      ],
+      examples: [
+        '帮我找个能查天气的 skill',
+        '搜索翻译相关的 skill',
+        '有没有处理 PDF 的工具',
+        '推荐一些好用的技能',
+        '怎么通过 skill 来生成图片',
+      ],
+      confidence_boost: 0.15,
+      target: 'skill',
+      priority: 6,
+    });
+
+    // 8. clawhub_install - 安装 Skill
+    this.intentPatterns.set('clawhub_install', {
+      id: 'clawhub_install',
+      patterns: [
+        /(?:安装|下载|添加|装)(?:一个|一下)?(?:这个|那个)?(?:skill|技能|工具|插件)?(.+?)(?:吗|么)?/,
+        /(?:我要|我想|帮我)(?:用|使用|安装)(?:这个|那个)?(?:skill|技能|工具|插件)?(.+)/,
+        /(?:怎么|如何)(?:安装|添加)(?:这个|那个)?(?:skill|技能|工具|插件)?(.+)/,
+      ],
+      examples: [
+        '安装 github skill',
+        '帮我装一个翻译工具',
+        '我要用 weather 这个 skill',
+        '怎么安装这个插件',
+      ],
+      confidence_boost: 0.15,
+      target: 'skill',
+      priority: 7,
+    });
+
+    // 9. clawhub_manage - 管理 Skills（列出、更新、卸载）
+    this.intentPatterns.set('clawhub_manage', {
+      id: 'clawhub_manage',
+      patterns: [
+        /(?:列出|显示|查看)(?:所有|已安装)?(?:的)?(?:skill|技能|工具|插件)/,
+        /(?:我|系统)(?:装了|有|安装了|已经安装)(?:哪些|什么)?(?:skill|技能|工具|插件)/,
+        /(?:更新|升级)(?:所有|全部)?(?:的)?(?:skill|技能|工具|插件)/,
+        /(?:卸载|删除|移除)(?:这个|那个)?(?:skill|技能|工具|插件)?(.+)/,
+        /(?:查看|看看|给我)(?:skill|技能|工具|插件)?(.+?)(?:的)?(?:详情|信息|介绍)/,
+      ],
+      examples: [
+        '我装了哪些 skill',
+        '列出已安装的工具',
+        '更新所有 skill',
+        '卸载 github skill',
+        '查看 weather 的详细信息',
+      ],
+      confidence_boost: 0.12,
+      target: 'skill',
+      priority: 6,
+    });
+
     // v1.3: skill_management 意图组
     // 7. skill.install - 安装 Skill
     this.intentPatterns.set('skill.install', {

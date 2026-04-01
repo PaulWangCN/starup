@@ -4,7 +4,7 @@ import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { metaInstallerSkill } from '../skills/MetaInstallerSkill';
-import { skillhubCLI } from '../skills/SkillhubCLI';
+
 
 const execAsync = promisify(exec);
 
@@ -357,11 +357,12 @@ export class ToolRegistry {
       description: `安装 Skill 来扩展系统功能。
 
 【工作流程 - 自动执行】
-1. 检查 SkillHub CLI 是否已安装
-2. 如未安装，自动尝试安装 SkillHub CLI（无需用户干预）
-3. 使用 SkillHub CLI 安装指定 Skill
-4. 如失败，回退到内部 InstallManager 尝试安装
-5. 返回安装结果
+1. 在 ClawHub 搜索确认 skill 存在性
+2. 如不存在，提示用户并建议相似 skill
+3. 如存在多个，列出让用户选择
+4. 如存在单个，显示详情让用户确认
+5. 用户确认后通过 ClawHub 安装
+6. 返回安装结果
 
 【使用方式】
 直接调用此工具，传入 skill_name，无需告知用户中间步骤
@@ -369,7 +370,7 @@ export class ToolRegistry {
 【示例】
 用户："安装 web_search skill"
 你：调用 install_skill({"skill_name": "web_search"})
-然后直接告知结果即可`,
+然后根据返回结果告知用户即可`,
       parameters: [
         { name: 'skill_name', type: 'string', description: 'Skill 名称或 ID，如 "web_search", "weather", "translator"', required: true },
         { name: 'version', type: 'string', description: '版本号，如 "1.0.0"，不指定则安装最新版', required: false },
@@ -379,38 +380,7 @@ export class ToolRegistry {
         const version = args.version;
 
         try {
-          // 检查 SkillHub CLI 是否已安装
-          let skillhubInstalled = await skillhubCLI.isInstalled();
-          
-          // 如果未安装，尝试自动安装
-          if (!skillhubInstalled) {
-            console.log('[install_skill] SkillHub CLI not found, attempting auto-install...');
-            const autoInstallResult = await skillhubCLI.autoInstall();
-            
-            if (autoInstallResult.success) {
-              console.log('[install_skill] SkillHub CLI auto-installed successfully');
-              skillhubInstalled = true;
-            } else {
-              console.warn('[install_skill] Auto-install failed:', autoInstallResult.message);
-            }
-          }
-          
-          // 使用 SkillHub CLI 安装
-          if (skillhubInstalled) {
-            const result = await skillhubCLI.install(skillName, version);
-            if (result.success) {
-              return {
-                success: true,
-                data: {
-                  skill_id: result.skillId,
-                  version: result.version,
-                  message: `已成功通过 SkillHub 安装 ${skillName}`,
-                },
-              };
-            }
-          }
-
-          // 回退到使用 MetaInstallerSkill
+          // v1.3.2: 直接使用 MetaInstallerSkill（内部已集成 ClawHub）
           const result = await metaInstallerSkill.install(
             {
               skill_hint: skillName,
@@ -426,6 +396,9 @@ export class ToolRegistry {
           return {
             success: result.success,
             data: result.data,
+            message: result.message,
+            requires_confirmation: result.requires_confirmation,
+            confirmation_type: result.confirmation_type,
             error: result.success ? undefined : result.message,
           };
         } catch (error) {

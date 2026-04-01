@@ -245,14 +245,33 @@ export class PromptAssembler {
    * 当前加载的Skill目录与触发条件
    */
   private generateLayer5(skills: Skill[]): string {
-    if (!skills || skills.length === 0) {
+    // 添加内置 Meta-Skills 到列表
+    const allSkills = [...skills];
+    
+    // 添加 core.clawhub skill 描述（如果尚未加载）
+    const hasClawhubSkill = allSkills.some(s => s.id === 'core.clawhub');
+    if (!hasClawhubSkill) {
+      allSkills.push({
+        id: 'core.clawhub',
+        metadata: {
+          name: 'ClawHub 连接器',
+          description: '通过 ClawHub CLI 搜索、安装和管理 Skills。支持搜索 skill、安装 skill、查看详情、列出已安装、更新和卸载 skill 等功能。',
+          version: '1.0.0',
+          tools: ['clawhub_search', 'clawhub_install', 'clawhub_manage'],
+        },
+        content: '',
+        path: '',
+      } as Skill);
+    }
+
+    if (allSkills.length === 0) {
       return this.wrapLayer('SKILLS', '当前没有加载技能。');
     }
 
-    const skillList = skills.map((skill, index) => {
+    const skillList = allSkills.map((skill, index) => {
       const meta = skill.metadata;
       return [
-        `## ${index + 1}. ${meta.name}`,
+        `## ${index + 1}. ${meta.name} (${skill.id})`,
         `描述: ${meta.description}`,
         `版本: ${meta.version || '1.0.0'}`,
         meta.tools && meta.tools.length > 0 ? `所需工具: ${meta.tools.join(', ')}` : '',
@@ -260,12 +279,63 @@ export class PromptAssembler {
       ].filter(Boolean).join('\n');
     });
 
+    // ClawHub 使用指南
+    const clawhubGuide = `
+## ClawHub Skill 使用指南
+
+当用户需要搜索、安装或管理 Skills 时，使用 \`core.clawhub\` skill：
+
+### 搜索 Skill
+触发词："帮我找个...skill", "搜索...相关的 skill", "有没有...的工具"
+\`\`\`json
+{ "skill": "core.clawhub", "action": "search", "query": "关键词" }
+\`\`\`
+
+### 安装 Skill
+触发词："安装...skill", "帮我装...", "我要用..."
+\`\`\`json
+{ "skill": "core.clawhub", "action": "install", "skill_hint": "skill名称" }
+\`\`\`
+
+### 查看详情
+触发词："...skill是干嘛的", "介绍一下...", "查看...详情"
+\`\`\`json
+{ "skill": "core.clawhub", "action": "info", "skill_id": "skill名称" }
+\`\`\`
+
+### 列出已安装
+触发词："我装了哪些skill", "列出已安装的"
+\`\`\`json
+{ "skill": "core.clawhub", "action": "list" }
+\`\`\`
+
+### 更新 Skill
+触发词："更新所有skill", "把...更新到最新"
+\`\`\`json
+{ "skill": "core.clawhub", "action": "update", "skill_id": "skill名称" }
+\`\`\`
+
+### 卸载 Skill
+触发词："卸载...skill", "删除..."
+\`\`\`json
+{ "skill": "core.clawhub", "action": "uninstall", "skill_id": "skill名称" }
+\`\`\`
+
+### 探索推荐
+触发词："有什么推荐的skill", "看看热门工具"
+\`\`\`json
+{ "skill": "core.clawhub", "action": "explore" }
+\`\`\`
+`;
+
     const content = [
       '# 已加载技能',
       '',
-      `当前系统已加载 ${skills.length} 个技能：`,
+      `当前系统已加载 ${allSkills.length} 个技能：`,
       '',
       ...skillList,
+      '',
+      clawhubGuide,
       '',
       '当用户请求与某个技能描述匹配时，你可以调用该技能来提供专业服务。',
     ].join('\n');

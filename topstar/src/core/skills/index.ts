@@ -11,6 +11,8 @@ export { DependencyResolver } from './DependencyResolver';
 export { Sandbox } from './Sandbox';
 export { SkillHubClient, skillHubClient } from './SkillHubClient';
 export { SkillhubCLI, skillhubCLI } from './SkillhubCLI';
+export { ClawhubConnector, clawhubConnector } from './ClawhubConnector';
+export { MetaClawhubSkill, metaClawhubSkill } from './MetaClawhubSkill';
 export { MetaInstallerSkill, metaInstallerSkill } from './MetaInstallerSkill';
 export { MetaRegistrySkill, metaRegistrySkill } from './MetaRegistrySkill';
 export { MetaUpdaterSkill, metaUpdaterSkill } from './MetaUpdaterSkill';

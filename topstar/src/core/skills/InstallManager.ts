@@ -415,14 +415,31 @@ export class InstallManager {
 
   /**
    * 验证包
+   * v1.3.2: 支持 clawhub 标记文件
    */
   private async verifyPackage(packagePath: string, spec: InstallSpec): Promise<boolean> {
     try {
       // 检查文件是否存在
       const stats = await fs.stat(packagePath);
       
-      // 如果是 .claw 文件，先解压
+      // 如果是 .claw 文件，检查是否是 clawhub 标记文件
       if (!stats.isDirectory() && packagePath.endsWith('.claw')) {
+        const content = await fs.readFile(packagePath, 'utf-8');
+        
+        try {
+          const metadata = JSON.parse(content);
+          if (metadata.source === 'clawhub' && metadata.path) {
+            // 验证 clawhub 安装的实际路径
+            const manifestPath = path.join(metadata.path, 'manifest.yaml');
+            await fs.access(manifestPath);
+            console.log(`[InstallManager] Verified clawhub package at ${metadata.path}`);
+            return true;
+          }
+        } catch {
+          // 不是 JSON，按常规 .claw 处理
+        }
+        
+        // 常规 .claw 文件，需要解压
         const extractDir = packagePath.replace('.claw', '');
         await this.extractClawPackage(packagePath, extractDir);
         return true; // 解压成功即视为验证通过
@@ -454,10 +471,30 @@ export class InstallManager {
 
   /**
    * 解析 manifest
+   * v1.3.2: 支持 clawhub 安装的包
    */
   private async parseManifest(packagePath: string): Promise<SkillManifest> {
-    // 如果是 .claw 文件，先解压
+    // 如果是 .claw 文件，检查是否是 clawhub 标记文件
     if (packagePath.endsWith('.claw')) {
+      const content = await fs.readFile(packagePath, 'utf-8');
+      
+      // 检查是否是 clawhub 标记文件
+      try {
+        const metadata = JSON.parse(content);
+        if (metadata.source === 'clawhub' && metadata.path) {
+          // 这是 clawhub 安装的包，直接使用安装路径
+          console.log(`[InstallManager] Using clawhub installed package at ${metadata.path}`);
+          packagePath = metadata.path;
+          
+          const manifestPath = path.join(packagePath, 'manifest.yaml');
+          const manifestContent = await fs.readFile(manifestPath, 'utf-8');
+          return YAML.parse(manifestContent) as SkillManifest;
+        }
+      } catch {
+        // 不是 JSON，继续按常规 .claw 处理
+      }
+      
+      // 常规 .claw 文件，需要解压
       const extractDir = packagePath.replace('.claw', '');
       await this.extractClawPackage(packagePath, extractDir);
       packagePath = extractDir;
@@ -533,6 +570,7 @@ export class InstallManager {
 
   /**
    * 注册 Skill
+   * v1.3.2: 支持 clawhub 安装的包
    */
   private async registerSkill(
     manifest: SkillManifest,
@@ -541,9 +579,62 @@ export class InstallManager {
   ): Promise<string> {
     const skillPath = path.join(this.userSkillsDir, manifest.id);
     
+    // 检查是否是 clawhub 标记文件
+    let isClawhubPackage = false;
+    let clawhubPath: string | null = null;
+    
+    if (packagePath.endsWith('.claw')) {
+      try {
+        const content = await fs.readFile(packagePath, 'utf-8');
+        const metadata = JSON.parse(content);
+        if (metadata.source === 'clawhub' && metadata.path) {
+          isClawhubPackage = true;
+          clawhubPath = metadata.path;
+        }
+      } catch {
+        // 不是 clawhub 标记文件
+      }
+    }
+    
     // 清理旧版本
     if (options.force) {
       await fs.rm(skillPath, { recursive: true, force: true });
+    }
+    
+    if (isClawhubPackage && clawhubPath) {
+      // clawhub 安装的包：创建软链接到 clawhub 目录
+      console.log(`[InstallManager] Linking clawhub package from ${clawhubPath}`);
+      
+      // 确保父目录存在
+      await fs.mkdir(path.dirname(skillPath), { recursive: true });
+      
+      // 如果目标已存在，先删除
+      try {
+        await fs.rm(skillPath, { recursive: true, force: true });
+      } catch {
+        // 忽略错误
+      }
+      
+      // 创建软链接
+      await fs.symlink(clawhubPath, skillPath, 'junction');
+      
+      // 创建数据目录（在 clawhub 目录下）
+      const dataPath = path.join(clawhubPath, 'data');
+      await fs.mkdir(dataPath, { recursive: true });
+      
+      // 记录到注册表
+      const skillPackage: SkillPackage = {
+        manifest,
+        path: clawhubPath, // 使用实际路径
+        status: 'installed',
+        installedAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      
+      this.installedSkills.set(manifest.id, skillPackage);
+      await this.saveSkillDb();
+      
+      return clawhubPath;
     }
     
     // 创建目录
