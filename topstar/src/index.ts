@@ -107,12 +107,11 @@ export class StarUpCore {
     // 如果 LLM 服务可用，调用它
     if (this.llmService) {
       const tools = this.toolRegistry.getToolDescriptions();
-      const maxIterations = 10; // 防止无限循环
+      const maxIterations = 100; // 足够的迭代次数完成任务
       let iteration = 0;
       
       while (iteration < maxIterations) {
         iteration++;
-        console.log(`[StarUpCore] ReAct iteration ${iteration}`);
         
         const response = await this.llmService.chat(
           session.context.messages,
@@ -143,9 +142,7 @@ export class StarUpCore {
           const toolName = toolCall.function.name;
           const toolArgs = JSON.parse(toolCall.function.arguments);
           
-          console.log(`[StarUpCore] Tool call: ${toolName}(${JSON.stringify(toolArgs)})`);
-          
-          // 通知外部（用于显示工具调用）
+          // 通知外部（用于 UI 更新）
           if (onToolCall) {
             onToolCall(toolName, toolArgs);
           }
@@ -155,8 +152,6 @@ export class StarUpCore {
             toolArgs,
             session
           );
-          
-          console.log(`[StarUpCore] Tool result: ${JSON.stringify(result).substring(0, 200)}`);
           
           // 添加工具结果到会话
           this.sessionManager.addMessage(sessionId, {
@@ -170,8 +165,25 @@ export class StarUpCore {
         // 继续循环，让 AI 观察结果并决定下一步
       }
       
-      // 达到最大迭代次数
-      return '[达到最大迭代次数，请简化您的请求]';
+      // 达到最大迭代次数，让 AI 总结当前状态
+      this.sessionManager.addMessage(sessionId, {
+        role: 'system',
+        content: '已达到最大迭代次数。请基于已收集的信息给出当前进展和下一步建议。',
+        timestamp: Date.now(),
+      });
+      
+      const finalResponse = await this.llmService.chat(
+        session.context.messages,
+        tools
+      );
+      
+      this.sessionManager.addMessage(sessionId, {
+        role: 'assistant',
+        content: finalResponse.content,
+        timestamp: Date.now(),
+      });
+      
+      return finalResponse.content;
     }
 
     return 'LLM service not configured';

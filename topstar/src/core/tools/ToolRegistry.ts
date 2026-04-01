@@ -24,7 +24,6 @@ export class ToolRegistry {
     }
     
     this.registerCoreTools();
-    console.log(`[ToolRegistry] Working directory: ${this.workingDir}`);
   }
 
   /**
@@ -32,7 +31,6 @@ export class ToolRegistry {
    */
   register(tool: ToolDefinition): void {
     this.tools.set(tool.name, tool);
-    console.log(`[ToolRegistry] Registered tool: ${tool.name}`);
   }
 
   /**
@@ -251,8 +249,6 @@ export class ToolRegistry {
         }
 
         try {
-          console.log(`[ToolRegistry] Executing: ${args.command}`);
-          
           // 转换 Unix 命令到 Windows
           let command = args.command;
           if (process.platform === 'win32') {
@@ -266,6 +262,9 @@ export class ToolRegistry {
               .replace(/^mv\s+/i, 'move ')
               .replace(/^rm\s+/i, 'del ')
               .replace(/^touch\s+/i, 'type nul > ');
+            
+            // Windows: 先设置 UTF-8 编码
+            command = `chcp 65001 >nul && ${command}`;
           }
           
           const { stdout, stderr } = await execAsync(command, {
@@ -276,16 +275,15 @@ export class ToolRegistry {
             shell: process.platform === 'win32' ? 'cmd.exe' : undefined,
           });
           
-          console.log(`[ToolRegistry] Command completed`);
+          // 清理 Windows 编码设置输出
+          let output = (stdout || '').replace(/^Active code page: \d+\r?\n?/i, '').trim();
+          let errOutput = (stderr || '').trim();
           
           // 限制输出长度，避免截断
-          const maxLen = 2000;
-          let output = stdout || '';
+          const maxLen = 3000;
           if (output.length > maxLen) {
             output = output.substring(0, maxLen) + '\n... (output truncated)';
           }
-          
-          let errOutput = stderr || '';
           if (errOutput.length > maxLen) {
             errOutput = errOutput.substring(0, maxLen) + '\n... (stderr truncated)';
           }
@@ -297,16 +295,17 @@ export class ToolRegistry {
               stderr: errOutput || '(no stderr)',
               exitCode: 0,
               platform: process.platform,
-              workingDir: this.workingDir,
             },
           };
         } catch (error: any) {
-          console.error(`[ToolRegistry] Command failed:`, error.message);
-          
-          // 处理错误输出编码
+          // 处理错误输出
           let errorMsg = error.message;
-          let stdout = error.stdout || '';
-          let stderr = error.stderr || '';
+          let stdout = (error.stdout || '').toString();
+          let stderr = (error.stderr || '').toString();
+          
+          // 清理 Windows 编码设置输出
+          stdout = stdout.replace(/^Active code page: \d+\r?\n?/i, '').trim();
+          stderr = stderr.replace(/^Active code page: \d+\r?\n?/i, '').trim();
           
           // 如果是 Windows 命令未找到错误，给出友好提示
           if (process.platform === 'win32' && error.code === 'ENOENT') {
@@ -317,11 +316,10 @@ export class ToolRegistry {
             success: false,
             error: errorMsg,
             data: {
-              stdout: stdout.toString().substring(0, 2000),
-              stderr: stderr.toString().substring(0, 2000),
+              stdout: stdout.substring(0, 3000),
+              stderr: stderr.substring(0, 3000),
               exitCode: error.code || 1,
               platform: process.platform,
-              workingDir: this.workingDir,
             },
           };
         }
