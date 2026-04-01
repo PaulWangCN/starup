@@ -325,7 +325,7 @@ export class TerminalChat {
         return true;
 
       case 'skills':
-        console.log('ℹ️ Skills are auto-loaded from topstar/skills/ and ~/.starup/skills/');
+        console.log('ℹ️ Skills are auto-loaded from app/skills/ and ~/.starup/skills/');
         return true;
 
       case 'tools':

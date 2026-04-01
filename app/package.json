@@ -1,5 +1,5 @@
 {
-  "name": "topstar",
+  "name": "app",
   "version": "1.0.0",
   "description": "AI助手运行时环境与集成平台",
   "main": "dist/index.js",
