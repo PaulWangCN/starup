@@ -26,10 +26,27 @@ cp .env.example .env
 # 编辑 .env 填入你的 API Key
 ```
 
-### 3. 启动终端对话
+### 3. 启动 Gateway（推荐）
+
+Gateway 是 StarUp 的统一控制平面与通信枢纽，提供 HTTP API、WebSocket 控制平面和外部适配器路由。
 
 ```bash
-# 交互式终端对话（推荐）
+# 启动 Gateway（开发模式）
+npm run gateway
+
+# 或生产模式
+npm run build
+npm run gateway:prod
+```
+
+Gateway 默认端口：
+- HTTP API: `http://127.0.0.1:18788`
+- WebSocket: `ws://127.0.0.1:18789`
+
+### 4. 启动终端对话
+
+```bash
+# 交互式终端对话
 npm run chat
 
 # 或开发模式
@@ -53,10 +70,11 @@ src/
 │   ├── skills/             # Skills管理
 │   ├── llm/                # LLM服务
 │   └── channels/           # 通道管理
-├── connectors/             # 平台连接器
+├── channels/               # 平台通道（Channel）
 │   ├── feishu/             # 飞书
-│   ├── weixin/             # 微信
-│   └── dingtalk/           # 钉钉
+│   ├── telegram/           # Telegram
+│   ├── dingtalk/           # 钉钉
+│   └── weixin/             # 微信
 ├── scheduler/              # 任务调度
 ├── types/                  # 类型定义
 └── index.ts                # 入口文件
@@ -128,6 +146,37 @@ AI: 我来帮你读取文件...
 
 ## 程序化使用示例
 
+### Gateway API
+
+Gateway 启动后，可通过以下接口与系统交互：
+
+```bash
+# 健康检查
+curl http://127.0.0.1:18788/health
+
+# 创建会话
+curl -X POST http://127.0.0.1:18788/api/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"clientId": "my-client"}'
+
+# 聊天（非流式）
+curl -X POST http://127.0.0.1:18788/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"clientId": "my-client", "message": "你好"}'
+
+# OpenAI 兼容 API（支持 SSE 流式）
+curl -X POST http://127.0.0.1:18788/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"你好"}], "stream": true}'
+```
+
+WebSocket 协议示例：
+```json
+{ "id": "req-1", "type": "chat", "payload": { "message": "你好" } }
+{ "type": "status" }
+{ "type": "ping" }
+```
+
 ### 基础对话
 
 ```typescript
@@ -179,6 +228,11 @@ const result = await toolRegistry.execute('read', {
 | `FEISHU_ENABLED` | 启用飞书 | 否 |
 | `FEISHU_APP_ID` | 飞书 App ID | 条件 |
 | `FEISHU_APP_SECRET` | 飞书 App Secret | 条件 |
+| `TELEGRAM_ENABLED` | 启用 Telegram | 否 |
+| `TELEGRAM_BOT_TOKEN` | Telegram Bot Token | 条件 |
+| `DINGTALK_ENABLED` | 启用钉钉 | 否 |
+| `DINGTALK_CLIENT_ID` | 钉钉 Client ID (AppKey) | 条件 |
+| `DINGTALK_CLIENT_SECRET` | 钉钉 Client Secret (AppSecret) | 条件 |
 
 ### Skill 开发
 

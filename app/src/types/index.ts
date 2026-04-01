@@ -359,6 +359,7 @@ export interface OutgoingMessage {
   channel: string;
   target: { user_id?: string; group_id?: string };
   content: MessageContent;
+  metadata?: Record<string, any>;
 }
 
 // ==================== Cron & Heartbeat ====================

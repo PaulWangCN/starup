@@ -1,10 +1,10 @@
 import axios, { AxiosInstance } from 'axios';
+import * as lark from '@larksuiteoapi/node-sdk';
 import {
   ChannelConnector,
   ChannelConfig,
   UnifiedMessage,
   OutgoingMessage,
-  Sender,
   MessageContent,
 } from '../../types';
 
@@ -20,30 +20,43 @@ interface FeishuMessage {
   message_type: string;
   content: string;
   create_time: string;
+  chat_id?: string;
 }
 
 /**
  * 飞书连接器
- * 实现飞书开放平台的消息接收和发送
+ * 使用飞书官方 SDK 的 WebSocket 长连接接收消息
+ * 不需要公网地址即可接收事件
  */
 export class FeishuConnector implements ChannelConnector {
   name: string = 'feishu';
-  
+
   private config: ChannelConfig | null = null;
   private httpClient: AxiosInstance | null = null;
   private tenantAccessToken: string = '';
   private tokenExpiry: number = 0;
   private messageCallback: ((message: UnifiedMessage) => void) | null = null;
-  private eventHandler: any = null;
+  private tokenRefreshTimer: NodeJS.Timeout | null = null;
+
+  // 官方 SDK 客户端
+  private wsClient: lark.WSClient | null = null;
+  private eventDispatcher: lark.EventDispatcher | null = null;
 
   /**
    * 初始化连接器
    */
-  async initialize(config: ChannelConfig): Promise<void> {
-    this.config = config;
-    
-    if (!config.enabled) {
+  async initialize(config?: ChannelConfig): Promise<void> {
+    if (config) {
+      this.config = config;
+    }
+    if (!this.config) {
+      return;
+    }
+    if (!this.config.enabled) {
       console.log('[FeishuConnector] Disabled');
+      return;
+    }
+    if (this.httpClient) {
       return;
     }
 
@@ -52,35 +65,71 @@ export class FeishuConnector implements ChannelConnector {
       timeout: 30000,
     });
 
-    // 获取 tenant access token
     await this.refreshToken();
-    
     console.log('[FeishuConnector] Initialized');
   }
 
   /**
-   * 启动消息监听
+   * 启动 WebSocket 长连接
    */
   async start(): Promise<void> {
     if (!this.config?.enabled) return;
+    if (this.wsClient) return;
 
-    // 这里应该启动 webhook 服务器或建立 websocket 连接
-    // 简化版本：通过轮询获取消息（实际生产环境应使用事件订阅）
-    console.log('[FeishuConnector] Started');
-    
-    // 启动定期刷新 token
-    setInterval(() => this.refreshToken(), 30 * 60 * 1000); // 每30分钟
+    const { app_id, app_secret } = this.config.credentials;
+    if (!app_id || !app_secret) {
+      console.error('[FeishuConnector] Missing app_id or app_secret for WebSocket');
+      return;
+    }
+
+    console.log('[FeishuConnector] Starting WebSocket long connection...');
+
+    // 启动定期刷新 token（用于发送消息）
+    if (!this.tokenRefreshTimer) {
+      this.tokenRefreshTimer = setInterval(() => this.refreshToken(), 30 * 60 * 1000);
+    }
+
+    // 创建官方 SDK 的 WSClient
+    this.wsClient = new lark.WSClient({
+      appId: app_id,
+      appSecret: app_secret,
+      domain: lark.Domain.Feishu,
+    });
+
+    // 创建事件分发器
+    this.eventDispatcher = new lark.EventDispatcher({});
+
+    // 注册消息接收事件
+    this.eventDispatcher.register({
+      'im.message.receive_v1': (data: any) => {
+        this.handleSdkEvent(data);
+        return undefined; // 不需要返回特定内容
+      },
+    });
+
+    // 启动长连接（非阻塞，SDK 内部自动重连）
+    await this.wsClient.start({ eventDispatcher: this.eventDispatcher });
   }
 
   /**
    * 停止连接器
    */
   async stop(): Promise<void> {
+    if (this.tokenRefreshTimer) {
+      clearInterval(this.tokenRefreshTimer);
+      this.tokenRefreshTimer = null;
+    }
+    if (this.wsClient) {
+      this.wsClient.close({ force: true });
+      this.wsClient = null;
+    }
+    this.eventDispatcher = null;
+    this.httpClient = null;
     console.log('[FeishuConnector] Stopped');
   }
 
   /**
-   * 发送消息
+   * 发送消息（HTTP）
    */
   async send(message: OutgoingMessage): Promise<void> {
     if (!this.httpClient) {
@@ -90,13 +139,10 @@ export class FeishuConnector implements ChannelConnector {
     await this.ensureToken();
 
     const { target, content } = message;
-    
-    // 构建消息体
     const messageBody = this.buildMessageBody(content);
-    
+
     try {
       if (target.user_id) {
-        // 发送给用户
         await this.httpClient.post('/im/v1/messages?receive_id_type=open_id', {
           receive_id: target.user_id,
           msg_type: content.type === 'text' ? 'text' : 'interactive',
@@ -105,7 +151,6 @@ export class FeishuConnector implements ChannelConnector {
           headers: { Authorization: `Bearer ${this.tenantAccessToken}` },
         });
       } else if (target.group_id) {
-        // 发送到群聊
         await this.httpClient.post('/im/v1/messages?receive_id_type=chat_id', {
           receive_id: target.group_id,
           msg_type: content.type === 'text' ? 'text' : 'interactive',
@@ -114,7 +159,7 @@ export class FeishuConnector implements ChannelConnector {
           headers: { Authorization: `Bearer ${this.tenantAccessToken}` },
         });
       }
-      
+
       console.log(`[FeishuConnector] Message sent to ${target.user_id || target.group_id}`);
     } catch (error) {
       console.error('[FeishuConnector] Failed to send message:', error);
@@ -123,14 +168,17 @@ export class FeishuConnector implements ChannelConnector {
   }
 
   /**
-   * 处理 webhook 事件
+   * 处理 webhook 事件（保留兼容）
    */
   handleWebhookEvent(event: any): void {
     if (!this.messageCallback) return;
 
-    // 处理消息事件
     if (event.type === 'message') {
-      const message = this.convertToUnifiedMessage(event.data);
+      const data = event.data as FeishuMessage;
+      if (data.sender?.sender_type === 'bot') {
+        return;
+      }
+      const message = this.convertToUnifiedMessage(data);
       this.messageCallback(message);
     }
   }
@@ -144,18 +192,39 @@ export class FeishuConnector implements ChannelConnector {
 
   // ==================== 私有方法 ====================
 
+  private handleSdkEvent(data: any): void {
+    if (!this.messageCallback) return;
+
+    console.log('[FeishuConnector] SDK event received:', data?.header?.event_type || 'unknown');
+
+    // SDK 的 EventDispatcher.parse 会把 event 字段展平到 data 中
+    // 所以 data.message 就是 FeishuMessage，而不是 data.event.message
+    const msg = (data?.message || data?.event?.message) as FeishuMessage;
+    if (!msg) {
+      console.log('[FeishuConnector] No message in event data');
+      return;
+    }
+
+    // 过滤机器人自己发送的消息
+    if (msg.sender?.sender_type === 'bot') {
+      console.log('[FeishuConnector] Ignoring bot self-message');
+      return;
+    }
+
+    console.log('[FeishuConnector] Processing message from', msg.sender?.sender_id?.open_id);
+    const message = this.convertToUnifiedMessage(msg);
+    this.messageCallback(message);
+  }
+
   private async refreshToken(): Promise<void> {
     if (!this.config?.credentials) return;
 
     const { app_id, app_secret } = this.config.credentials;
-    
+
     try {
       const response = await axios.post(
         'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
-        {
-          app_id,
-          app_secret,
-        }
+        { app_id, app_secret }
       );
 
       if (response.data.code === 0) {
@@ -180,10 +249,8 @@ export class FeishuConnector implements ChannelConnector {
     switch (content.type) {
       case 'text':
         return { text: content.body };
-      
       case 'card':
         return content.body;
-      
       default:
         return { text: String(content.body) };
     }
@@ -194,24 +261,18 @@ export class FeishuConnector implements ChannelConnector {
 
     switch (feishuMsg.message_type) {
       case 'text':
-        content = {
-          type: 'text',
-          body: JSON.parse(feishuMsg.content).text,
-        };
+        try {
+          const parsed = JSON.parse(feishuMsg.content);
+          content = { type: 'text', body: parsed.text || feishuMsg.content };
+        } catch {
+          content = { type: 'text', body: feishuMsg.content };
+        }
         break;
-      
       case 'image':
-        content = {
-          type: 'image',
-          body: feishuMsg.content,
-        };
+        content = { type: 'image', body: feishuMsg.content };
         break;
-      
       default:
-        content = {
-          type: 'text',
-          body: feishuMsg.content,
-        };
+        content = { type: 'text', body: feishuMsg.content };
     }
 
     return {
@@ -219,35 +280,13 @@ export class FeishuConnector implements ChannelConnector {
       channel_msg_id: feishuMsg.message_id,
       sender: {
         id: feishuMsg.sender.sender_id.open_id,
-        name: '', // 需要通过用户信息接口获取
+        name: '',
         type: feishuMsg.sender.sender_type === 'user' ? 'user' : 'bot',
       },
       content,
       timestamp: parseInt(feishuMsg.create_time),
-      metadata: {},
+      metadata: { chat_id: feishuMsg.chat_id },
     };
-  }
-
-  /**
-   * 获取用户信息
-   */
-  async getUserInfo(openId: string): Promise<{ name: string } | null> {
-    if (!this.httpClient) return null;
-
-    try {
-      await this.ensureToken();
-      const response = await this.httpClient.get(`/contact/v3/users/${openId}`, {
-        headers: { Authorization: `Bearer ${this.tenantAccessToken}` },
-      });
-
-      if (response.data.code === 0) {
-        return { name: response.data.data.user.name };
-      }
-      return null;
-    } catch (error) {
-      console.error('[FeishuConnector] Failed to get user info:', error);
-      return null;
-    }
   }
 }
 
