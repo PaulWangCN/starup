@@ -234,55 +234,93 @@ export class ToolRegistry {
     // exec: 执行shell命令
     this.register({
       name: 'exec',
-      description: '沙盒化执行shell命令。支持超时控制，默认60秒，最大300秒。高危命令需要确认。',
+      description: '执行shell命令（自动适配 Windows/Mac/Linux）。常用命令：Windows用"dir"、Mac/Linux用"ls"。支持超时控制，默认60秒。',
       parameters: [
-        { name: 'command', type: 'string', description: '要执行的命令', required: true },
+        { name: 'command', type: 'string', description: '要执行的命令。Windows: 用dir/cd; Mac/Linux: 用ls/pwd', required: true },
         { name: 'timeout', type: 'number', description: '超时时间（秒）', required: false, default: 60 },
-        { name: 'env', type: 'object', description: '环境变量', required: false },
       ],
       handler: async (args) => {
-        const timeout = Math.min(args.timeout || 60, 300); // 最大300秒
+        const timeout = Math.min(args.timeout || 60, 300);
         
         // 高危命令检查
-        const dangerousCommands = ['rm -rf /', 'mkfs', 'dd if=/dev/zero'];
+        const dangerousCommands = ['rm -rf /', 'mkfs', 'dd if=/dev/zero', 'format', 'del /f /s /q'];
         for (const dangerous of dangerousCommands) {
-          if (args.command.includes(dangerous)) {
-            return { success: false, error: 'Dangerous command blocked' };
+          if (args.command.toLowerCase().includes(dangerous)) {
+            return { success: false, error: 'Dangerous command blocked for security' };
           }
         }
 
         try {
           console.log(`[ToolRegistry] Executing: ${args.command}`);
           
-          const { stdout, stderr } = await execAsync(args.command, {
+          // 转换 Unix 命令到 Windows
+          let command = args.command;
+          if (process.platform === 'win32') {
+            // 简单的命令转换
+            command = command
+              .replace(/^ls\s+-la$/i, 'dir')
+              .replace(/^ls\s+(-[a-z]+)?\s*/i, 'dir ')
+              .replace(/^pwd$/i, 'cd')
+              .replace(/^cat\s+/i, 'type ')
+              .replace(/^cp\s+/i, 'copy ')
+              .replace(/^mv\s+/i, 'move ')
+              .replace(/^rm\s+/i, 'del ')
+              .replace(/^touch\s+/i, 'type nul > ');
+          }
+          
+          const { stdout, stderr } = await execAsync(command, {
             timeout: timeout * 1000,
             cwd: this.workingDir,
-            env: { ...process.env, ...args.env },
-            windowsHide: true, // Windows: 隐藏命令窗口
-            shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/bash',
+            encoding: 'utf8',
+            windowsHide: true,
+            shell: process.platform === 'win32' ? 'cmd.exe' : undefined,
           });
           
-          console.log(`[ToolRegistry] Command completed successfully`);
+          console.log(`[ToolRegistry] Command completed`);
+          
+          // 限制输出长度，避免截断
+          const maxLen = 2000;
+          let output = stdout || '';
+          if (output.length > maxLen) {
+            output = output.substring(0, maxLen) + '\n... (output truncated)';
+          }
+          
+          let errOutput = stderr || '';
+          if (errOutput.length > maxLen) {
+            errOutput = errOutput.substring(0, maxLen) + '\n... (stderr truncated)';
+          }
           
           return {
             success: true,
             data: {
-              stdout: stdout || '(no output)',
-              stderr: stderr || '(no stderr)',
+              stdout: output || '(no output)',
+              stderr: errOutput || '(no stderr)',
               exitCode: 0,
+              platform: process.platform,
               workingDir: this.workingDir,
             },
           };
         } catch (error: any) {
           console.error(`[ToolRegistry] Command failed:`, error.message);
           
+          // 处理错误输出编码
+          let errorMsg = error.message;
+          let stdout = error.stdout || '';
+          let stderr = error.stderr || '';
+          
+          // 如果是 Windows 命令未找到错误，给出友好提示
+          if (process.platform === 'win32' && error.code === 'ENOENT') {
+            errorMsg = `Command not found. On Windows, try using "dir" instead of "ls", "cd" instead of "pwd"`;
+          }
+          
           return {
             success: false,
-            error: error.message,
+            error: errorMsg,
             data: {
-              stdout: error.stdout || '',
-              stderr: error.stderr || '',
+              stdout: stdout.toString().substring(0, 2000),
+              stderr: stderr.toString().substring(0, 2000),
               exitCode: error.code || 1,
+              platform: process.platform,
               workingDir: this.workingDir,
             },
           };
