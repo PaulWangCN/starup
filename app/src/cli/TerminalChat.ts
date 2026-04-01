@@ -1,6 +1,5 @@
 import * as readline from 'readline';
 import chalk from 'chalk';
-import ora from 'ora';
 import { Renderer } from './Renderer';
 import { StarUpCore } from '../index';
 import { PromptAssembler, createDefaultConfig, RuntimeContext } from '../core/prompt/PromptAssembler';
@@ -69,8 +68,13 @@ export class TerminalChat {
 
     // 处理输入
     this.rl.on('line', async (input) => {
-      await this.handleInput(input);
-      if (this.running) {
+      try {
+        await this.handleInput(input);
+      } catch (error: any) {
+        this.renderer.error(`输入处理错误: ${error?.message || error}`);
+      }
+      // 无论成功与否，都确保重新显示提示符
+      if (this.running && this.rl) {
         this.showPrompt();
       }
     });
@@ -135,6 +139,7 @@ export class TerminalChat {
    * 停止终端聊天
    */
   stop(): void {
+    this.stopSpinner();
     this.running = false;
     if (this.rl) {
       this.rl.close();
@@ -201,6 +206,35 @@ export class TerminalChat {
     }
   }
 
+  private spinnerTimer: NodeJS.Timeout | null = null;
+  private spinnerFrame = 0;
+  private readonly spinnerChars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+  /**
+   * 启动简单文字加载动画（不干扰 readline）
+   */
+  private startSpinner(text: string): void {
+    this.stopSpinner();
+    this.spinnerFrame = 0;
+    process.stdout.write(chalk.cyan(`${this.spinnerChars[0]} ${text}`));
+    this.spinnerTimer = setInterval(() => {
+      this.spinnerFrame = (this.spinnerFrame + 1) % this.spinnerChars.length;
+      process.stdout.write(`\r${chalk.cyan(this.spinnerChars[this.spinnerFrame] + ' ' + text)}`);
+    }, 80);
+  }
+
+  /**
+   * 停止加载动画
+   */
+  private stopSpinner(): void {
+    if (this.spinnerTimer) {
+      clearInterval(this.spinnerTimer);
+      this.spinnerTimer = null;
+      // 清除行
+      process.stdout.write('\r' + ' '.repeat(50) + '\r');
+    }
+  }
+
   /**
    * 处理消息并与 AI 对话
    */
@@ -211,7 +245,6 @@ export class TerminalChat {
     }
 
     const thinkingLines: string[] = [];
-    let currentSpinner: import('ora').Ora | null = null;
     let streamStarted = false;
 
     const printThinking = () => {
@@ -227,6 +260,14 @@ export class TerminalChat {
       console.log();
     };
 
+    // 暂停 readline 以避免与流式输出冲突
+    if (this.rl) {
+      this.rl.pause();
+    }
+
+    // 启动加载动画
+    this.startSpinner('AI 思考中...');
+
     try {
       const result = await this.core.processMessage(
         this.mainSessionId,
@@ -234,37 +275,33 @@ export class TerminalChat {
         {
           onThinking: (content) => {
             thinkingLines.push(content);
-            if (!currentSpinner) {
-              currentSpinner = ora({
-                text: 'AI思考中...',
-                color: 'cyan',
-                spinner: 'line',
-                interval: 500,
-              }).start();
-            }
           },
           onToolCall: (name, args) => {
-            // 不再更新 spinner text，避免闪烁
+            this.stopSpinner();
+            console.log(chalk.yellow(`  → 调用工具: ${name}`));
           },
           onToolResult: (name, result) => {
-            // 不再更新 spinner text，避免闪烁
+            const success = result.success !== false;
+            console.log(success ? chalk.green('  ✓ 完成') : chalk.red('  ✗ 失败'));
+            // 重新开始加载动画
+            this.startSpinner('AI 继续思考...');
           },
           onIterationStart: (iteration) => {
             streamStarted = false;
           },
           onStreamChunk: (chunk) => {
             if (!streamStarted) {
-              (currentSpinner as any)?.stop();
+              this.stopSpinner();
               printThinking();
               streamStarted = true;
-              process.stdout.write(chalk.green('🤖 AI:') + '\n');
+              console.log(chalk.green('🤖 AI:'));
             }
             process.stdout.write(chunk);
           },
         }
       );
 
-      (currentSpinner as any)?.stop();
+      this.stopSpinner();
 
       if (!streamStarted) {
         // 流式未触发，回退到原有一次性显示逻辑
@@ -278,9 +315,15 @@ export class TerminalChat {
         console.log();
       }
 
-    } catch (error) {
-      (currentSpinner as any)?.stop();
-      this.renderer.error(`处理消息失败: ${error}`);
+    } catch (error: any) {
+      this.stopSpinner();
+      this.renderer.error(`处理消息失败: ${error?.message || error}`);
+      console.log();
+    } finally {
+      // 恢复 readline
+      if (this.rl) {
+        this.rl.resume();
+      }
     }
   }
 

@@ -184,6 +184,8 @@ export class LLMService {
     payload: any,
     callbacks?: { onChunk?: (chunk: string) => void }
   ): Promise<{ content: string; tool_calls?: any[] }> {
+    const TIMEOUT_MS = 120000; // 2分钟超时
+    
     try {
       const response = await axios.post(url, payload, {
         headers: {
@@ -192,14 +194,24 @@ export class LLMService {
           Accept: 'text/event-stream',
         },
         responseType: 'stream',
+        timeout: TIMEOUT_MS,
       });
 
       const stream = response.data as NodeJS.ReadableStream;
       let buffer = '';
       let content = '';
       const toolCallsBuffer: any[] = [];
+      let isCompleted = false;
 
       return new Promise((resolve, reject) => {
+        // 设置超时
+        const timeoutTimer = setTimeout(() => {
+          if (!isCompleted) {
+            isCompleted = true;
+            reject(new Error(`Stream timeout after ${TIMEOUT_MS}ms`));
+          }
+        }, TIMEOUT_MS);
+
         stream.on('data', (chunk: Buffer) => {
           buffer += chunk.toString('utf-8');
           const lines = buffer.split('\n');
@@ -211,6 +223,13 @@ export class LLMService {
 
             const data = trimmed.slice(6);
             if (data === '[DONE]') {
+              // 收到结束信号，立即完成
+              if (!isCompleted) {
+                isCompleted = true;
+                clearTimeout(timeoutTimer);
+                const tool_calls = toolCallsBuffer.length > 0 ? toolCallsBuffer : undefined;
+                resolve({ content, tool_calls });
+              }
               continue;
             }
 
@@ -255,12 +274,20 @@ export class LLMService {
         });
 
         stream.on('end', () => {
-          const tool_calls = toolCallsBuffer.length > 0 ? toolCallsBuffer : undefined;
-          resolve({ content, tool_calls });
+          if (!isCompleted) {
+            isCompleted = true;
+            clearTimeout(timeoutTimer);
+            const tool_calls = toolCallsBuffer.length > 0 ? toolCallsBuffer : undefined;
+            resolve({ content, tool_calls });
+          }
         });
 
         stream.on('error', (err: Error) => {
-          reject(new Error(`Stream error: ${err.message}`));
+          if (!isCompleted) {
+            isCompleted = true;
+            clearTimeout(timeoutTimer);
+            reject(new Error(`Stream error: ${err.message}`));
+          }
         });
       });
     } catch (error: any) {
