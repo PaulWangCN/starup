@@ -218,7 +218,16 @@ export class ToolRegistry {
               .replace(/^mv\s+/i, 'move ')
               .replace(/^rm\s+/i, 'del ')
               .replace(/^touch\s+/i, 'type nul > ');
-            command = `chcp 65001 >nul && ${command}`;
+            // 改进的编码处理：对于Python命令使用PowerShell以获得更好的Unicode支持
+            const isPythonCommand = command.includes('python') && (command.includes('-c') || command.includes('.py'));
+            if (isPythonCommand) {
+              // 对于Python命令，使用PowerShell执行以获得更好的UTF-8支持
+              // 转义命令中的双引号
+              const escapedCommand = command.replace(/"/g, '\\"');
+              command = `powershell -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${escapedCommand}"`;
+            } else {
+              command = `chcp 65001 >nul && ${command}`;
+            }
           }
           const { stdout, stderr } = await execAsync(command, {
             timeout: timeout * 1000,
