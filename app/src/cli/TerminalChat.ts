@@ -15,6 +15,7 @@ export class TerminalChat {
   private running: boolean = false;
   private mainSessionId: string | null = null;
   private promptAssembler: PromptAssembler;
+  private notifications: string[] = [];
 
   constructor(core?: StarUpCore) {
     this.core = core || new StarUpCore();
@@ -45,6 +46,15 @@ export class TerminalChat {
     // 初始化主会话，传入系统提示词
     const mainSession = this.core.sessionManager.initializeMainSession(systemPrompt);
     this.mainSessionId = mainSession.id;
+
+    // 注册定时任务结果回调：把后台任务结果投递到通知队列
+    this.core.onScheduledTaskComplete = (content) => {
+      this.notifications.push(content);
+      // 如果当前没有在对话中（没有 spinner），立即显示；否则排队等待当前轮次结束
+      if (!this.spinnerTimer) {
+        this.flushNotifications();
+      }
+    };
 
     // 显示欢迎界面
     this.renderer.showWelcome();
@@ -200,6 +210,10 @@ export class TerminalChat {
         this.showTools();
         return true;
 
+      case 'tasks':
+        this.showTasks();
+        return true;
+
       default:
         this.renderer.error(`未知命令: ${cmd}`);
         return true;
@@ -338,6 +352,7 @@ export class TerminalChat {
   /status         显示系统状态
   /skills         列出已加载的 Skills
   /tools          列出可用工具
+  /tasks          列出定时任务
 
 直接输入消息与 AI 对话。
 `);
@@ -371,10 +386,32 @@ export class TerminalChat {
   }
 
   /**
+   * 显示定时任务列表
+   */
+  private showTasks(): void {
+    const tasks = this.core.scheduler.getTasks();
+    if (tasks.length === 0) {
+      console.log('\n暂无定时任务。');
+      return;
+    }
+    console.log('\n定时任务列表:');
+    for (const task of tasks) {
+      const status = task.enabled ? '✅ 启用' : '⏸️ 停用';
+      const lastRun = task.lastRun ? new Date(task.lastRun).toLocaleString() : '从未';
+      console.log(`  - ${task.name} (${status})`);
+      console.log(`    ID: ${task.id}`);
+      console.log(`    Cron: ${task.schedule}`);
+      console.log(`    已执行: ${task.runCount} 次, 上次执行: ${lastRun}`);
+      console.log(`    Prompt: ${task.prompt.slice(0, 50)}${task.prompt.length > 50 ? '...' : ''}`);
+    }
+    console.log();
+  }
+
+  /**
    * 自动补全
    */
   private completer(line: string): [string[], string] {
-    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools'];
+    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools', '/tasks'];
     const hits = completions.filter((c) => c.startsWith(line));
     return [hits.length ? hits : completions, line];
   }
@@ -383,8 +420,24 @@ export class TerminalChat {
    * 显示提示符
    */
   private showPrompt(): void {
+    this.flushNotifications();
     if (this.rl) {
       this.rl.prompt();
     }
+  }
+
+  /**
+   * 刷出通知队列中的定时任务消息
+   */
+  private flushNotifications(): void {
+    if (this.notifications.length === 0) return;
+    // 清除当前行，避免和 spinner 或 readline 冲突
+    process.stdout.write('\r' + ' '.repeat(60) + '\r');
+    for (const msg of this.notifications) {
+      console.log(chalk.yellow('⏰ 定时任务消息'));
+      console.log(msg);
+      console.log();
+    }
+    this.notifications = [];
   }
 }

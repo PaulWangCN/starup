@@ -10,6 +10,7 @@ import { MemoryManager, memoryManager } from './core/memory/MemoryManager';
 import { ToolRegistry, toolRegistry } from './core/tools/ToolRegistry';
 import { skillRegistry } from './core/skills/SkillRegistry';
 import { LLMService } from './core/llm/LLMService';
+import { TaskScheduler, taskScheduler } from './core/scheduler/TaskScheduler';
 import { SystemConfig } from './types';
 
 export * from './types';
@@ -18,6 +19,7 @@ export * from './core/memory/MemoryManager';
 export * from './core/tools/ToolRegistry';
 export * from './core/skills';
 export * from './core/llm/LLMService';
+export * from './core/scheduler/TaskScheduler';
 export * from './core/prompt';
 export * from './core/intent';
 
@@ -38,6 +40,8 @@ export class StarUpCore {
   toolRegistry: ToolRegistry;
   skillRegistry: typeof skillRegistry;
   llmService: LLMService | null = null;
+  scheduler: TaskScheduler;
+  onScheduledTaskComplete?: (content: string) => void;
   private config: SystemConfig;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private heartbeatSessionId: string | null = null;
@@ -48,6 +52,7 @@ export class StarUpCore {
     this.memoryManager = memoryManager;
     this.toolRegistry = toolRegistry;
     this.skillRegistry = skillRegistry;
+    this.scheduler = taskScheduler;
 
     const llmProvider = (process.env.LLM_PROVIDER as any) || 'deepseek';
     const llmModel = process.env.LLM_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
@@ -84,6 +89,50 @@ export class StarUpCore {
     await this.ensureConfigFiles();
     
     await this.skillRegistry.initialize();
+
+    // 设置定时任务执行器（后台静默执行，避免干扰 CLI spinner）
+    this.scheduler.setExecutor({
+      execute: async (prompt: string) => {
+        if (!this.systemPrompt || !this.llmService) return;
+        // 临时静默 stdout，防止后台任务日志打断前台 CLI 输出
+        const originalWrite = process.stdout.write.bind(process.stdout);
+        const originalLog = console.log;
+        const originalError = console.error;
+        process.stdout.write = () => true;
+        console.log = () => {};
+        console.error = () => {};
+
+        const session = this.sessionManager.createStandaloneSession(this.systemPrompt);
+        let finalReply = '';
+        try {
+          const result = await this.processMessage(session.id, prompt);
+          finalReply = result.finalReply;
+        } catch (e) {
+          // 静默处理执行错误
+        } finally {
+          this.sessionManager.destroySession(session.id);
+          process.stdout.write = originalWrite;
+          console.log = originalLog;
+          console.error = originalError;
+        }
+
+        // 恢复输出后，通过回调把 AI 回复传递给前端（如 TerminalChat）
+        if (finalReply && this.onScheduledTaskComplete) {
+          this.onScheduledTaskComplete(finalReply);
+        }
+      },
+    });
+
+    // 注册调度器工具
+    this.toolRegistry.registerSchedulerTools(
+      this.scheduler.createTask.bind(this.scheduler),
+      this.scheduler.cancelTask.bind(this.scheduler),
+      this.scheduler.getTasks.bind(this.scheduler),
+      this.scheduler.findTask.bind(this.scheduler)
+    );
+
+    // 加载并启动已持久化的定时任务
+    await this.scheduler.initialize();
     
     // 启动心跳定时器
     this.startHeartbeatTimer();
@@ -422,6 +471,7 @@ export class StarUpCore {
   async shutdown(): Promise<void> {
     console.log('[StarUpCore] Shutting down...');
     this.stopHeartbeat();
+    await this.scheduler.shutdown();
     this.skillRegistry.stopAutoScan();
     console.log('[StarUpCore] Shutdown complete');
   }

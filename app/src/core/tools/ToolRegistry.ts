@@ -1,4 +1,4 @@
-import { ToolDefinition, ToolResult, Session } from '../../types';
+import { ToolDefinition, ToolResult, Session, ScheduledTask, TaskExecutor } from '../../types';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { exec } from 'child_process';
@@ -14,6 +14,8 @@ export class ToolRegistry {
   private tools: Map<string, ToolDefinition> = new Map();
   private toolSources: Map<string, string> = new Map();
   private workingDir: string;
+  private schedulerExecutor: TaskExecutor | null = null;
+  private scheduledTasks: Map<string, ScheduledTask> = new Map();
 
   constructor() {
     this.workingDir = process.cwd();
@@ -84,6 +86,79 @@ export class ToolRegistry {
 
   getWorkingDir(): string {
     return this.workingDir;
+  }
+
+  /**
+   * 注册调度器相关工具
+   */
+  registerSchedulerTools(
+    createTask: (name: string, schedule: string, prompt: string, enabled?: boolean) => Promise<{ success: boolean; task?: ScheduledTask; error?: string }>,
+    cancelTask: (id: string) => Promise<{ success: boolean; error?: string }>,
+    getTasks: () => ScheduledTask[],
+    findTask: (query: string) => ScheduledTask | undefined
+  ): void {
+    // schedule_task: 创建定时任务
+    this.register({
+      name: 'schedule_task',
+      description: '创建一个定时任务。当到达指定时间时，系统会自动执行对应的 AI 提示词。支持标准 5 字段 cron 表达式。\n常用示例:\n- 每天早上9点: "0 9 * * *"\n- 每小时: "0 * * * *"\n- 每30分钟: "*/30 * * * *"\n- 每周一早上8点: "0 8 * * 1"\n- 每天凌晨0点: "0 0 * * *"',
+      parameters: [
+        { name: 'name', type: 'string', description: '任务名称（唯一标识，建议用英文）', required: true },
+        { name: 'schedule', type: 'string', description: 'cron 表达式，5 个字段: 分 时 日 月 星期', required: true },
+        { name: 'prompt', type: 'string', description: '任务触发时发给 AI 的提示词/指令', required: true },
+        { name: 'enabled', type: 'boolean', description: '是否立即启用', required: false, default: true },
+      ],
+      handler: async (args) => {
+        const result = await createTask(args.name, args.schedule, args.prompt, args.enabled !== false);
+        if (result.success && result.task) {
+          this.scheduledTasks.set(result.task.id, result.task);
+          return { success: true, data: { id: result.task.id, name: result.task.name, schedule: result.task.schedule } };
+        }
+        return { success: false, error: result.error };
+      },
+    }, 'scheduler');
+
+    // list_scheduled_tasks: 列出所有定时任务
+    this.register({
+      name: 'list_scheduled_tasks',
+      description: '列出当前所有的定时任务，包括任务ID、名称、cron表达式和启用状态。',
+      parameters: [],
+      handler: async () => {
+        const tasks = getTasks();
+        return {
+          success: true,
+          data: tasks.map((t) => ({
+            id: t.id,
+            name: t.name,
+            schedule: t.schedule,
+            enabled: t.enabled,
+            createdAt: t.createdAt,
+            lastRun: t.lastRun,
+            runCount: t.runCount,
+          })),
+        };
+      },
+    }, 'scheduler');
+
+    // cancel_scheduled_task: 取消定时任务
+    this.register({
+      name: 'cancel_scheduled_task',
+      description: '取消（删除）一个定时任务。可以通过任务ID或任务名称来指定。',
+      parameters: [
+        { name: 'id_or_name', type: 'string', description: '任务ID或任务名称', required: true },
+      ],
+      handler: async (args) => {
+        // 先尝试精确匹配ID或名称
+        const task = findTask(args.id_or_name);
+        if (!task) {
+          return { success: false, error: `Task not found: ${args.id_or_name}` };
+        }
+        const result = await cancelTask(task.id);
+        if (result.success) {
+          this.scheduledTasks.delete(task.id);
+        }
+        return result;
+      },
+    }, 'scheduler');
   }
 
   // ==================== 核心工具注册 ====================

@@ -363,6 +363,21 @@ export interface OutgoingMessage {
 
 // ==================== Cron & Heartbeat ====================
 
+export interface ScheduledTask {
+  id: string;
+  name: string;
+  schedule: string;            // crontab 格式
+  prompt: string;              // 触发时发送给 AI 的提示词
+  enabled: boolean;
+  createdAt: number;
+  lastRun?: number;
+  runCount: number;
+}
+
+export interface TaskExecutor {
+  execute: (prompt: string) => Promise<void>;
+}
+
 export interface CronJob {
   id: string;
   schedule: string;            // crontab 格式
