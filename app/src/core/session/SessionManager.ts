@@ -18,6 +18,48 @@ export class SessionManager {
   private mainSessionId: string | null = null;
 
   /**
+   * 创建一个独立的会话（不覆盖 mainSessionId）
+   * @param systemPrompt 可选的系统提示词
+   */
+  createStandaloneSession(systemPrompt?: string): Session {
+    const messages: ConversationMessage[] = [];
+
+    if (systemPrompt) {
+      messages.push({
+        role: 'system',
+        content: systemPrompt,
+        timestamp: Date.now(),
+      });
+    }
+
+    const session: Session = {
+      id: uuidv4(),
+      type: 'main',
+      status: 'active',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      context: {
+        messages,
+        tokenCount: 0,
+        compressed: false,
+      },
+      memory: {
+        shortTerm: [],
+        dailyLog: this.getDailyLogPath(),
+        longTerm: path.join(process.env.HOME || process.env.USERPROFILE || '.', '.starup', 'MEMORY.md'),
+      },
+      allowedTools: ['read', 'write', 'edit', 'exec', 'web_search'],
+      memoryAccess: 'write',
+      timeout: 300,
+      callbackToParent: false,
+    };
+
+    this.sessions.set(session.id, session);
+    console.log(`[SessionManager] Standalone session created: ${session.id}`);
+    return session;
+  }
+
+  /**
    * 初始化主会话
    * @param systemPrompt 可选的系统提示词
    */

@@ -40,6 +40,9 @@ export class TerminalChat {
     // 生成系统提示词（七层 Prompt）
     const systemPrompt = await this.generateSystemPrompt();
 
+    // 设置系统提示词（同时用于心跳会话）
+    this.core.setSystemPrompt(systemPrompt);
+
     // 初始化主会话，传入系统提示词
     const mainSession = this.core.sessionManager.initializeMainSession(systemPrompt);
     this.mainSessionId = mainSession.id;

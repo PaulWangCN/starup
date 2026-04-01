@@ -37,6 +37,9 @@ export class StarUpCore {
   skillRegistry: typeof skillRegistry;
   llmService: LLMService | null = null;
   private config: SystemConfig;
+  private heartbeatTimer: NodeJS.Timeout | null = null;
+  private heartbeatSessionId: string | null = null;
+  private systemPrompt: string | null = null;
 
   constructor(config?: Partial<SystemConfig>) {
     this.sessionManager = sessionManager;
@@ -75,7 +78,94 @@ export class StarUpCore {
     await this.ensureConfigFiles();
     
     await this.skillRegistry.initialize();
+    
+    // 启动心跳定时器
+    this.startHeartbeatTimer();
+    
     console.log('[StarUpCore] Initialization complete');
+  }
+
+  /**
+   * 设置系统提示词（用于心跳会话）
+   */
+  setSystemPrompt(prompt: string): void {
+    this.systemPrompt = prompt;
+  }
+
+  /**
+   * 启动心跳定时器
+   */
+  private startHeartbeatTimer(): void {
+    if (this.heartbeatTimer) return;
+    const interval = this.config.heartbeat?.interval || 1800000;
+    this.heartbeatTimer = setInterval(() => {
+      this.runHeartbeat().catch(() => {
+        // 静默忽略心跳错误，避免打扰用户
+      });
+    }, interval);
+    console.log(`[StarUpCore] Heartbeat timer started (interval: ${interval}ms)`);
+  }
+
+  /**
+   * 执行一次心跳任务
+   */
+  private async runHeartbeat(): Promise<void> {
+    if (!this.systemPrompt || !this.llmService) {
+      return;
+    }
+
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '.';
+    const heartbeatPath = path.join(homeDir, '.starup', 'HEARTBEAT.md');
+
+    let heartbeatContent: string;
+    try {
+      heartbeatContent = await fs.readFile(heartbeatPath, 'utf-8');
+    } catch {
+      // HEARTBEAT.md 不存在或无法读取，跳过本次心跳
+      return;
+    }
+
+    if (!heartbeatContent.trim()) {
+      return;
+    }
+
+    // 确保心跳会话存在
+    if (!this.heartbeatSessionId) {
+      const session = this.sessionManager.createStandaloneSession(this.systemPrompt);
+      this.heartbeatSessionId = session.id;
+    }
+
+    try {
+      await this.processMessage(this.heartbeatSessionId, heartbeatContent.trim());
+    } catch (error) {
+      // 静默忽略，用户无感知
+    } finally {
+      // 清理心跳会话历史，只保留 system prompt，避免上下文无限膨胀
+      const session = this.sessionManager.getSession(this.heartbeatSessionId);
+      if (session) {
+        session.context.messages = session.context.messages.filter((m) => m.role === 'system');
+        session.updatedAt = Date.now();
+      }
+    }
+  }
+
+  /**
+   * 停止心跳定时器
+   */
+  stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+      console.log('[StarUpCore] Heartbeat timer stopped');
+    }
+    if (this.heartbeatSessionId) {
+      try {
+        this.sessionManager.destroySession(this.heartbeatSessionId);
+      } catch {
+        // ignore
+      }
+      this.heartbeatSessionId = null;
+    }
   }
 
   /**
@@ -126,7 +216,7 @@ export class StarUpCore {
       console.log(`[StarUpCore] Ensuring config directory exists: ${agentPath}`);
       
       // 需要检查并复制的文件列表
-      const filesToCheck = ['AGENTS.md', 'SOUL.md', 'IDENTITY.md', 'USER.md'];
+      const filesToCheck = ['AGENTS.md', 'SOUL.md', 'IDENTITY.md', 'USER.md', 'HEARTBEAT.md'];
       
       for (const filename of filesToCheck) {
         const targetPath = path.join(agentPath, filename);
@@ -319,6 +409,7 @@ export class StarUpCore {
 
   async shutdown(): Promise<void> {
     console.log('[StarUpCore] Shutting down...');
+    this.stopHeartbeat();
     this.skillRegistry.stopAutoScan();
     console.log('[StarUpCore] Shutdown complete');
   }
