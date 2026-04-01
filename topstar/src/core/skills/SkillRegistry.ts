@@ -15,6 +15,9 @@ import {
 } from '../../types';
 import { installManager } from './InstallManager';
 import { skillRuntime } from './SkillRuntime';
+import { metaInstallerSkill } from './MetaInstallerSkill';
+import { metaRegistrySkill } from './MetaRegistrySkill';
+import { metaUpdaterSkill } from './MetaUpdaterSkill';
 
 /**
  * Skill 注册表
@@ -45,23 +48,26 @@ export class SkillRegistry {
    */
   async initialize(): Promise<void> {
     console.log('[SkillRegistry] Initializing...');
-    
+
     // 初始化 InstallManager
     await installManager.initialize();
-    
+
     // 初始化 SkillRuntime
     await skillRuntime.initialize();
-    
+
+    // v1.3: 初始化 Meta-Skills
+    await this.initializeMetaSkills();
+
     // 加载内置 Skills
     await this.loadSkillsFromDirectory(this.builtinSkillsDir);
-    
+
     // 加载用户 Skills（v1.2 manifest.yaml）
     await this.loadPackagesFromDirectory(this.userSkillsDir);
-    
+
     // 同步 InstallManager 的已安装 Skills
     await this.syncInstalledSkills();
-    
-    console.log(`[SkillRegistry] Loaded ${this.skills.size} legacy skills, ${this.packages.size} v1.2 packages`);
+
+    console.log(`[SkillRegistry] Loaded ${this.skills.size} legacy skills, ${this.packages.size} v1.2 packages, 3 meta-skills`);
   }
 
   /**
@@ -489,6 +495,77 @@ export class SkillRegistry {
         }
       }
     }
+  }
+
+  /**
+   * 初始化 Meta-Skills
+   * v1.3: 加载 core.installer, core.registry, core.updater
+   */
+  private async initializeMetaSkills(): Promise<void> {
+    await metaRegistrySkill.initialize();
+    await metaInstallerSkill.initialize();
+    await metaUpdaterSkill.initialize();
+
+    // 将 Meta-Skills 注册为特殊的 SkillPackage
+    const metaSkills = [
+      {
+        manifest: {
+          id: 'core.installer',
+          name: 'Skill 安装器',
+          version: '1.3.0',
+          api_version: '1.3',
+          author: 'StarUp',
+          license: 'MIT',
+          description: '处理 Skill 的安装、卸载和依赖管理',
+          runtime: { type: 'javascript', entry: 'index.js' },
+          permissions: metaInstallerSkill.permissions,
+        },
+        path: '',
+        status: 'active' as const,
+        installedAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+      {
+        manifest: {
+          id: 'core.registry',
+          name: 'Skill 注册表',
+          version: '1.3.0',
+          api_version: '1.3',
+          author: 'StarUp',
+          license: 'MIT',
+          description: '管理本地 Skill 索引与 Hub 查询',
+          runtime: { type: 'javascript', entry: 'index.js' },
+          permissions: metaRegistrySkill.permissions,
+        },
+        path: '',
+        status: 'active' as const,
+        installedAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+      {
+        manifest: {
+          id: 'core.updater',
+          name: 'Skill 更新器',
+          version: '1.3.0',
+          api_version: '1.3',
+          author: 'StarUp',
+          license: 'MIT',
+          description: '检查版本更新，处理升级策略',
+          runtime: { type: 'javascript', entry: 'index.js' },
+          permissions: metaUpdaterSkill.permissions,
+        },
+        path: '',
+        status: 'active' as const,
+        installedAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ];
+
+    for (const pkg of metaSkills) {
+      this.packages.set(pkg.manifest.id, pkg as any);
+    }
+
+    console.log('[SkillRegistry] Meta-skills initialized');
   }
 
   /**

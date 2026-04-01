@@ -21,6 +21,7 @@ export class SkillRuntime {
   private vmPool: Map<string, VMWorker> = new Map();
   private sandbox: Sandbox;
   private promptFragments: Map<string, PromptFragment> = new Map();
+  private eventListeners: Map<string, ((data: any) => void)[]> = new Map();
 
   constructor() {
     this.sandbox = new Sandbox();
@@ -33,6 +34,21 @@ export class SkillRuntime {
     console.log('[SkillRuntime] Initializing...');
     // 恢复之前激活的 Skills
     await this.restoreActiveSkills();
+  }
+
+  /**
+   * 加载并激活 Skill（一步完成）
+   * v1.3: 支持零重启热扩展
+   */
+  async loadAndActivate(pkg: SkillPackage): Promise<SkillInstance> {
+    const instance = await this.load(pkg);
+    await this.activate(instance);
+    this.emit('skill_installed', {
+      skillId: pkg.manifest.id,
+      version: pkg.manifest.version,
+      timestamp: Date.now(),
+    });
+    return instance;
   }
 
   /**
@@ -226,6 +242,45 @@ export class SkillRuntime {
    */
   getPromptFragments(): PromptFragment[] {
     return Array.from(this.promptFragments.values());
+  }
+
+  /**
+   * 注册事件监听器
+   */
+  on(event: string, callback: (data: any) => void): void {
+    if (!this.eventListeners.has(event)) {
+      this.eventListeners.set(event, []);
+    }
+    this.eventListeners.get(event)!.push(callback);
+  }
+
+  /**
+   * 移除事件监听器
+   */
+  off(event: string, callback: (data: any) => void): void {
+    const listeners = this.eventListeners.get(event);
+    if (listeners) {
+      const index = listeners.indexOf(callback);
+      if (index > -1) {
+        listeners.splice(index, 1);
+      }
+    }
+  }
+
+  /**
+   * 触发事件
+   */
+  private emit(event: string, data: any): void {
+    const listeners = this.eventListeners.get(event);
+    if (listeners) {
+      for (const callback of listeners) {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error(`[SkillRuntime] Event listener error for ${event}:`, error);
+        }
+      }
+    }
   }
 
   /**

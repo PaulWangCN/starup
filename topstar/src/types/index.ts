@@ -473,3 +473,109 @@ export class InstallError extends SkillError {
     this.name = 'InstallError';
   }
 }
+
+// ==================== v1.3: Meta-Skill & SkillHub 类型 ====================
+
+export interface HubSourceConfig {
+  name: string;
+  endpoint: string;
+  priority: number;
+  type?: 'http' | 'filesystem';
+  public_key?: string;
+  trusted?: boolean;
+  auth?: {
+    type: 'token' | 'oauth';
+    env?: string;
+    token?: string;
+    client_id?: string;
+  };
+}
+
+export interface SkillSearchRequest {
+  query: string;
+  filters?: {
+    category?: string;
+    runtime?: 'javascript' | 'python' | 'wasm';
+    trusted_only?: boolean;
+  };
+  hub_preference?: string[];
+}
+
+export interface SkillSearchResult {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  installed_version?: string;
+  update_available?: boolean;
+  manifest_digest: string;
+  capabilities_preview: string[];
+  source_hub: string;
+  trusted: boolean;
+}
+
+export interface SkillCandidate {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  source_hub: string;
+}
+
+export interface CapabilityPreview {
+  id: string;
+  name: string;
+  description: string;
+  risk_level: 'low' | 'medium' | 'high' | 'critical';
+  scope?: string[];
+}
+
+export interface InstallIntent {
+  skill_hint: string;
+  version?: string;
+  source_hub?: string;
+  force?: boolean;
+  offline?: boolean;
+}
+
+export interface ActionResult {
+  success: boolean;
+  message: string;
+  data?: any;
+  error?: string;
+  requires_confirmation?: boolean;
+  confirmation_type?: 'disambiguation' | 'capability' | 'general';
+  candidates?: SkillCandidate[];
+  capabilities?: CapabilityPreview[];
+}
+
+export interface MetaSkill {
+  id: string;
+  name: string;
+  description: string;
+  type: 'system' | 'meta';
+  permissions: Permission[];
+  handle(request: any, context: SessionContext): Promise<ActionResult>;
+}
+
+export interface SkillManagementDialog {
+  intent: 'skill.install' | 'skill.uninstall' | 'skill.update' | 'skill.query' | 'skill.search' | 'skill.config';
+  slots: Record<string, any>;
+  disambiguation?: SkillCandidate[];
+  confirmation?: CapabilityPreview[];
+  result?: ActionResult;
+  followUp?: string;
+}
+
+export interface SessionContext {
+  session: Session;
+  recentMessages: string[];
+  userPreferences: Record<string, any>;
+}
+
+export class TransactionError extends SkillError {
+  constructor(message: string, public rollbackSuccess: boolean) {
+    super(message, 'TRANSACTION_ERROR');
+    this.name = 'TransactionError';
+  }
+}

@@ -26,6 +26,12 @@ async function main(): Promise<void> {
   }
 
   switch (command) {
+    // v1.3: startup skill 子命令
+    case 'skill':
+      await commands.skill(commandArgs);
+      break;
+
+    // 兼容旧版 claw 命令
     case 'install':
       await commands.install(commandArgs);
       break;

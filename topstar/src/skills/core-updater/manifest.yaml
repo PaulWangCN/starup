@@ -1,0 +1,20 @@
+id: "core.updater"
+name: "Skill 更新器"
+version: "1.3.0"
+api_version: "1.3"
+author: "StarUp"
+license: "MIT"
+description: "检查版本更新，处理升级策略"
+type: "system"
+runtime:
+  type: "javascript"
+  entry: "index.js"
+permissions:
+  - id: "fs.modify"
+    scope: ["~/.starup/skills/*", "~/.starup/skilldb/*"]
+  - id: "version.check"
+    scope: ["*"]
+  - id: "network.hub"
+    scope:
+      allow: ["*"]
+      deny: []

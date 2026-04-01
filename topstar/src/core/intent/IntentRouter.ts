@@ -1,17 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { Session } from '../../types';
+import { Session, SessionContext } from '../../types';
 import { calculateSimilarity, extractKeywords, extractSlots } from './IntentUtils';
-
-/**
- * 会话上下文
- * 用于意图识别的上下文信息
- */
-export interface SessionContext {
-  session: Session;
-  recentMessages: string[];
-  userPreferences: Record<string, any>;
-}
 
 /**
  * 意图识别结果
@@ -176,6 +166,26 @@ export class IntentRouter {
     }
 
     console.log(`[IntentRouter] Registered skill intent: ${skillId}`);
+  }
+
+  /**
+   * 注销 Skill 的意图定义
+   * @param skillId Skill ID
+   */
+  unregisterSkillIntent(skillId: string): void {
+    this.skillIntents.delete(skillId);
+
+    // 清理关键词索引
+    for (const [keyword, entries] of this.skillKeywords) {
+      const filtered = entries.filter(e => e.skillId !== skillId);
+      if (filtered.length === 0) {
+        this.skillKeywords.delete(keyword);
+      } else {
+        this.skillKeywords.set(keyword, filtered);
+      }
+    }
+
+    console.log(`[IntentRouter] Unregistered skill intent: ${skillId}`);
   }
 
   /**
@@ -623,6 +633,97 @@ export class IntentRouter {
       priority: 8,
     });
 
+    // v1.3: skill_management 意图组
+    // 7. skill.install - 安装 Skill
+    this.intentPatterns.set('skill.install', {
+      id: 'skill.install',
+      patterns: [
+        /(?:安装|添加|给我装|我要|我需要)(?:一个|个)?(.+?)(?:skill|插件|功能|技能)?/,
+        /(?:装|安)(?:一个|个)?(.+?)(?:skill|插件|功能|技能)?/,
+      ],
+      examples: [
+        '安装天气 skill',
+        '添加邮件功能',
+        '我需要翻译插件',
+      ],
+      confidence_boost: 0.15,
+      target: 'skill',
+      priority: 9,
+      model: 'light',
+    });
+
+    // 8. skill.uninstall - 卸载 Skill
+    this.intentPatterns.set('skill.uninstall', {
+      id: 'skill.uninstall',
+      patterns: [
+        /(?:卸载|删除|移除|删掉)(?:这个|那个)?(.+?)(?:skill|插件|功能|技能)?/,
+      ],
+      examples: [
+        '卸载天气',
+        '删除这个插件',
+        '移除翻译功能',
+      ],
+      confidence_boost: 0.15,
+      target: 'skill',
+      priority: 9,
+      model: 'light',
+    });
+
+    // 9. skill.update - 更新 Skill
+    this.intentPatterns.set('skill.update', {
+      id: 'skill.update',
+      patterns: [
+        /(?:更新|升级)(?:所有|全部)?(.+?)(?:skill|插件|功能|技能)?/,
+        /(?:把|将)(.+?)(?:更新|升级)(?:到最新版)?/,
+      ],
+      examples: [
+        '更新所有技能',
+        '升级到最新版',
+        '更新天气插件',
+      ],
+      confidence_boost: 0.15,
+      target: 'skill',
+      priority: 9,
+      model: 'light',
+    });
+
+    // 10. skill.query - 查询已安装 Skill
+    this.intentPatterns.set('skill.query', {
+      id: 'skill.query',
+      patterns: [
+        /(?:列出|查看|显示)(?:所有|已安装)?(?:skill|插件|功能|技能)/,
+        /(?:有|装了)(?:什么|哪些)(?:skill|插件|功能|技能)/,
+        /(?:我)(?:有|装了)(?:什么|哪些)(?:功能|技能)/,
+      ],
+      examples: [
+        '列出已安装技能',
+        '有什么功能',
+        '装了哪些插件',
+      ],
+      confidence_boost: 0.1,
+      target: 'skill',
+      priority: 9,
+      model: 'light',
+    });
+
+    // 11. skill.search - 搜索 Skill
+    this.intentPatterns.set('skill.search', {
+      id: 'skill.search',
+      patterns: [
+        /(?:搜索|查找|找|搜)(?:一下)?(.+?)(?:skill|插件|功能|技能)/,
+        /(?:有没有|有没有)(.+?)(?:skill|插件|功能|技能)/,
+      ],
+      examples: [
+        '找一下翻译相关的 skill',
+        '搜索日历插件',
+        '有没有天气功能',
+      ],
+      confidence_boost: 0.1,
+      target: 'skill',
+      priority: 9,
+      model: 'light',
+    });
+
     console.log('[IntentRouter] Built-in intents registered');
   }
 
@@ -641,6 +742,80 @@ export class IntentRouter {
       `target: ${result.routing.target}, ` +
       `latency: ${latency}ms)`
     );
+  }
+
+  /**
+   * 路由到 Meta-Skill
+   * v1.3: 处理 skill_management 大类意图
+   */
+  async routeToMetaSkill(
+    intent: 'install' | 'uninstall' | 'update' | 'query' | 'search',
+    slots: Record<string, any>,
+    session: SessionContext
+  ): Promise<{ success: boolean; message: string; data?: any }> {
+    // 动态导入避免循环依赖
+    const { metaInstallerSkill } = await import('./../skills/MetaInstallerSkill');
+    const { metaRegistrySkill } = await import('./../skills/MetaRegistrySkill');
+    const { metaUpdaterSkill } = await import('./../skills/MetaUpdaterSkill');
+
+    switch (intent) {
+      case 'install':
+        return metaInstallerSkill.handle({
+          action: 'install',
+          intent: {
+            skill_hint: slots.skill_name || slots.skill || slots[0] || '',
+            version: slots.version,
+            source_hub: slots.source,
+          },
+        }, session);
+
+      case 'uninstall':
+        return metaInstallerSkill.handle({
+          action: 'uninstall',
+          skill_id: slots.skill_id || slots.skill_name || slots.skill || '',
+          purge_data: slots.purge_data === 'true' || slots.purge_data === true,
+        }, session);
+
+      case 'update':
+        if (slots.all || slots.skill_id === 'all') {
+          return metaUpdaterSkill.handle({ action: 'update_all' }, session);
+        }
+        return metaUpdaterSkill.handle({
+          action: 'update',
+          skill_id: slots.skill_id || slots.skill_name || slots.skill || '',
+          force: slots.force === 'true' || slots.force === true,
+        }, session);
+
+      case 'query':
+        return metaRegistrySkill.handle({
+          action: 'list',
+          filter: slots.filter,
+        }, session);
+
+      case 'search':
+        return metaRegistrySkill.handle({
+          action: 'search',
+          query: slots.keyword || slots.skill_name || slots.skill || '',
+          filters: { trusted_only: false },
+        }, session);
+
+      default:
+        return { success: false, message: `Unsupported meta intent: ${intent}` };
+    }
+  }
+
+  /**
+   * 模糊匹配 Skill 名称
+   */
+  async resolveFuzzySkillName(name: string): Promise<{ skillId: string; name: string; version: string; description: string }[]> {
+    const { metaRegistrySkill } = await import('./../skills/MetaRegistrySkill');
+    const candidates = await metaRegistrySkill.resolve(name);
+    return candidates.map(c => ({
+      skillId: c.id,
+      name: c.name,
+      version: c.version,
+      description: c.description,
+    }));
   }
 
   /**

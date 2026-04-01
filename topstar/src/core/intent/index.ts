@@ -10,7 +10,6 @@ export {
   type IntentRecognition,
   type IntentPattern,
   type SkillIntentDef,
-  type SessionContext,
 } from './IntentRouter';
 
 // 导出工具函数

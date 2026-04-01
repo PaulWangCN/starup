@@ -19,6 +19,7 @@ export class PackageDownloader {
 
   /**
    * 从 Marketplace 下载
+   * v1.3.1: 支持多 registry 尝试（SkillHub, ClawHub, 本地）
    */
   async downloadFromMarketplace(
     id: string,
@@ -49,33 +50,64 @@ export class PackageDownloader {
       }
     }
 
-    // 下载
-    const registryUrl = registry || 'https://marketplace.starup.ai';
-    const downloadUrl = `${registryUrl}/api/skills/${id}/${version}/download`;
+    // v1.3.1: 定义 registry 优先级列表
+    const registries = registry 
+      ? [registry]
+      : [
+          'https://skillhub.tencent.com',      // 腾讯 SkillHub (主要)
+          'https://clawhub.ai',                 // ClawHub (兜底)
+          'https://marketplace.starup.ai',      // 兼容旧配置
+        ];
 
-    console.log(`[PackageDownloader] Downloading from ${downloadUrl}...`);
+    let lastError: Error | undefined;
 
-    try {
-      const response = await axios.get(downloadUrl, {
-        responseType: 'arraybuffer',
-        timeout: 60000,
-        headers: {
-          'Accept': 'application/octet-stream',
-        },
-      });
+    // 依次尝试每个 registry
+    for (const registryUrl of registries) {
+      const downloadUrl = `${registryUrl}/api/v1/skills/${id}/download?version=${version}`;
+      
+      console.log(`[PackageDownloader] Trying ${registryUrl}...`);
 
-      // 保存到缓存
-      await fs.mkdir(cacheDir, { recursive: true });
-      await fs.writeFile(cachedPath, response.data);
+      try {
+        const response = await axios.get(downloadUrl, {
+          responseType: 'arraybuffer',
+          timeout: 30000,
+          headers: {
+            'Accept': 'application/octet-stream, application/zip, application/gzip',
+          },
+          // 允许 404 继续到下一个 registry
+          validateStatus: (status) => status === 200,
+        });
 
-      console.log(`[PackageDownloader] Downloaded to ${cachedPath}`);
-      return cachedPath;
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        throw new Error(`Failed to download from marketplace: ${error.message}`);
+        // 保存到缓存
+        await fs.mkdir(cacheDir, { recursive: true });
+        await fs.writeFile(cachedPath, response.data);
+
+        // 验证下载内容不是 HTML 错误页面
+        const fd = await fs.open(cachedPath, 'r');
+        const headerBuffer = Buffer.alloc(64);
+        await fd.read(headerBuffer, 0, 64, 0);
+        await fd.close();
+        const isHtml = headerBuffer.toString('utf-8').trimStart().startsWith('<');
+        if (isHtml) {
+          await fs.unlink(cachedPath);
+          throw new Error(`Registry ${registryUrl} returned an HTML page instead of a package file for ${id}@${version}`);
+        }
+
+        console.log(`[PackageDownloader] Downloaded from ${registryUrl} to ${cachedPath}`);
+        return cachedPath;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[PackageDownloader] ${registryUrl} failed: ${message}`);
+        // 优先保留 HTML 错误页面这类更有意义的错误
+        if (!lastError || message.includes('HTML page')) {
+          lastError = error instanceof Error ? error : new Error(message);
+        }
+        // 继续尝试下一个 registry
       }
-      throw error;
     }
+
+    // 所有 registry 都失败
+    throw lastError || new Error('All registries failed to download the package');
   }
 
   /**

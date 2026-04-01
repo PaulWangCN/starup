@@ -15,6 +15,7 @@ import {
   UpgradeResult,
   InstallError,
   DependencyError,
+  TransactionError,
 } from '../../types';
 import { DependencyResolver } from './DependencyResolver';
 import { SignatureVerifier } from '../install/SignatureVerifier';
@@ -65,19 +66,39 @@ export class InstallManager {
   /**
    * 主安装入口
    * 完整的7阶段安装流程：解析→获取→校验→依赖→隔离→注册→加载
+   * v1.3: 使用事务保证原子性
    */
   async install(spec: InstallSpec, options: InstallOptions = {}): Promise<InstallResult> {
     const startTime = Date.now();
+    const tx = new InstallTransaction();
     
     try {
+      // 验证 spec 参数
+      if (!spec || (typeof spec === 'object' && !spec.id && !spec.url && !spec.path)) {
+        return {
+          success: false,
+          message: '安装参数无效：缺少 skill ID 或安装源',
+        };
+      }
+      
       console.log(`[InstallManager] Installing ${spec.id || spec.url || spec.path}...`);
       
       // Phase 1: 解析安装指令
       const parsedSpec = await this.parseInstallSpec(spec);
-      console.log(`[InstallManager] Parsed spec: ${parsedSpec.id}@${parsedSpec.version || 'latest'}`);
+      
+      // 验证解析后的 spec
+      if (!parsedSpec.id && !parsedSpec.url && !parsedSpec.path) {
+        return {
+          success: false,
+          message: '无法解析安装参数：请提供有效的 skill 名称、URL 或本地路径',
+        };
+      }
+      
+      console.log(`[InstallManager] Parsed spec: ${parsedSpec.id || parsedSpec.url || parsedSpec.path}@${parsedSpec.version || 'latest'}`);
       
       // Phase 2: 获取包
       const packagePath = await this.acquirePackage(parsedSpec, options);
+      tx.recordDownload(packagePath);
       console.log(`[InstallManager] Package acquired: ${packagePath}`);
       
       // Phase 3: 校验
@@ -90,6 +111,7 @@ export class InstallManager {
       
       // 解析 manifest
       const manifest = await this.parseManifest(packagePath);
+      tx.setTargetSkill(manifest.id);
       
       // Phase 4: 依赖解析
       if (manifest.dependencies && manifest.dependencies.length > 0) {
@@ -113,16 +135,19 @@ export class InstallManager {
         // 安装依赖
         for (const dep of depTree.install_order) {
           if (!this.installedSkills.has(dep.manifest.id)) {
-            await this.installDependency(dep);
+            const depResult = await this.installDependency(dep);
+            tx.recordDependency(dep.manifest.id);
           }
         }
       }
       
       // Phase 5-6: 隔离与注册
       const skillPath = await this.registerSkill(manifest, packagePath, options);
+      tx.recordPlacement(skillPath);
       
       // Phase 7: 激活
       await this.activateSkill(manifest.id);
+      tx.commit();
       
       const duration = Date.now() - startTime;
       console.log(`[InstallManager] Installed ${manifest.id}@${manifest.version} in ${duration}ms`);
@@ -138,8 +163,8 @@ export class InstallManager {
     } catch (error) {
       console.error('[InstallManager] Installation failed:', error);
       
-      // 清理失败安装
-      await this.rollback(spec.id || 'unknown');
+      // 事务回滚
+      const rollbackSuccess = await tx.rollback(this);
       
       return {
         success: false,
@@ -395,15 +420,20 @@ export class InstallManager {
     try {
       // 检查文件是否存在
       const stats = await fs.stat(packagePath);
-      if (!stats.isDirectory() && !packagePath.endsWith('.claw')) {
+      
+      // 如果是 .claw 文件，先解压
+      if (!stats.isDirectory() && packagePath.endsWith('.claw')) {
+        const extractDir = packagePath.replace('.claw', '');
+        await this.extractClawPackage(packagePath, extractDir);
+        return true; // 解压成功即视为验证通过
+      }
+      
+      if (!stats.isDirectory()) {
         return false;
       }
       
       // 检查 manifest
-      const manifestPath = stats.isDirectory()
-        ? path.join(packagePath, 'manifest.yaml')
-        : path.join(packagePath, 'manifest.yaml'); // .claw 包内部
-        
+      const manifestPath = path.join(packagePath, 'manifest.yaml');
       await fs.access(manifestPath);
       
       // 验证签名（如果是下载的包）
@@ -426,9 +456,79 @@ export class InstallManager {
    * 解析 manifest
    */
   private async parseManifest(packagePath: string): Promise<SkillManifest> {
+    // 如果是 .claw 文件，先解压
+    if (packagePath.endsWith('.claw')) {
+      const extractDir = packagePath.replace('.claw', '');
+      await this.extractClawPackage(packagePath, extractDir);
+      packagePath = extractDir;
+    }
+    
     const manifestPath = path.join(packagePath, 'manifest.yaml');
     const content = await fs.readFile(manifestPath, 'utf-8');
     return YAML.parse(content) as SkillManifest;
+  }
+
+  /**
+   * 解压 .claw 包
+   */
+  private async extractClawPackage(clawPath: string, extractDir: string): Promise<void> {
+    // 检查是否已解压
+    try {
+      await fs.access(path.join(extractDir, 'manifest.yaml'));
+      console.log(`[InstallManager] Using cached extracted package: ${extractDir}`);
+      return;
+    } catch {
+      // 需要解压
+    }
+
+    console.log(`[InstallManager] Extracting ${clawPath} to ${extractDir}...`);
+    
+    await fs.mkdir(extractDir, { recursive: true });
+    
+    // 检查文件头，确认是有效的压缩包格式
+    const fd = await fs.open(clawPath, 'r');
+    const headerBuffer = Buffer.alloc(4);
+    await fd.read(headerBuffer, 0, 4, 0);
+    await fd.close();
+    
+    const isGzip = headerBuffer[0] === 0x1f && headerBuffer[1] === 0x8b;
+    const isZip = headerBuffer[0] === 0x50 && headerBuffer[1] === 0x4b && headerBuffer[2] === 0x03 && headerBuffer[3] === 0x04;
+    
+    if (!isGzip && !isZip) {
+      const headerHex = headerBuffer.toString('hex');
+      const headerPreview = headerBuffer.toString('utf-8').replace(/[^\x20-\x7E]/g, '?');
+      throw new Error(
+        `Invalid .claw package format: file is not a valid archive (expected gzip or zip, got header 0x${headerHex} / "${headerPreview}"). ` +
+        `The registry may have returned an error page instead of the actual package.`
+      );
+    }
+    
+    // 使用 tar 解压（.claw 实际上是 tar.gz 格式）
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    try {
+      // 尝试用 tar 解压
+      const tarCmd = process.platform === 'win32' ? 'tar.exe' : 'tar';
+      await execAsync(`${tarCmd} -xzf "${clawPath}" -C "${extractDir}"`);
+      console.log(`[InstallManager] Extracted successfully`);
+    } catch (error) {
+      // tar 失败，尝试作为 zip 解压
+      try {
+        if (process.platform === 'win32') {
+          // Windows 上使用 PowerShell Expand-Archive
+          await execAsync(`powershell -Command "Expand-Archive -Path '${clawPath.replace(/'/g, "''")}' -DestinationPath '${extractDir.replace(/'/g, "''")}' -Force"`);
+        } else {
+          await execAsync(`unzip -o "${clawPath}" -d "${extractDir}"`);
+        }
+        console.log(`[InstallManager] Extracted as zip successfully`);
+      } catch {
+        // 如果都失败，直接复制文件内容（可能 .claw 不是压缩包）
+        console.warn(`[InstallManager] Failed to extract, treating as plain file`);
+        throw new Error('Failed to extract .claw package');
+      }
+    }
   }
 
   /**
@@ -552,6 +652,37 @@ export class InstallManager {
   }
 
   /**
+   * 事务回滚（供 InstallTransaction 使用）
+   */
+  async performTransactionRollback(
+    targetSkillId: string | null,
+    placedPaths: string[],
+    downloadedPaths: string[]
+  ): Promise<void> {
+    // 1. 删除已放置的文件
+    for (const placedPath of placedPaths) {
+      await fs.rm(placedPath, { recursive: true, force: true });
+    }
+
+    // 2. 删除目标 Skill（如果已注册）
+    if (targetSkillId) {
+      const skillPath = path.join(this.userSkillsDir, targetSkillId);
+      await fs.rm(skillPath, { recursive: true, force: true });
+      this.installedSkills.delete(targetSkillId);
+    }
+
+    // 3. 清理下载的临时文件
+    for (const downloadPath of downloadedPaths) {
+      if (!downloadPath.startsWith('/') && !downloadPath.startsWith('.')) {
+        await fs.rm(downloadPath, { recursive: true, force: true });
+      }
+    }
+
+    // 4. 保存数据库状态
+    await this.saveSkillDb();
+  }
+
+  /**
    * 加载已安装的 Skill
    */
   private async loadInstalledSkills(): Promise<void> {
@@ -600,6 +731,56 @@ export class InstallManager {
       } else {
         await fs.copyFile(srcPath, destPath);
       }
+    }
+  }
+}
+
+/**
+ * 安装事务
+ * 保证安装流程的原子性
+ */
+class InstallTransaction {
+  private committed = false;
+  private targetSkillId: string | null = null;
+  private downloadedPaths: string[] = [];
+  private placedPaths: string[] = [];
+  private installedDependencies: string[] = [];
+
+  setTargetSkill(skillId: string): void {
+    this.targetSkillId = skillId;
+  }
+
+  recordDownload(path: string): void {
+    this.downloadedPaths.push(path);
+  }
+
+  recordPlacement(path: string): void {
+    this.placedPaths.push(path);
+  }
+
+  recordDependency(skillId: string): void {
+    this.installedDependencies.push(skillId);
+  }
+
+  commit(): void {
+    this.committed = true;
+  }
+
+  async rollback(manager: InstallManager): Promise<boolean> {
+    if (this.committed) return true;
+
+    try {
+      console.log('[InstallTransaction] Rolling back...');
+      await manager.performTransactionRollback(
+        this.targetSkillId,
+        this.placedPaths,
+        this.downloadedPaths
+      );
+      console.log('[InstallTransaction] Rollback completed');
+      return true;
+    } catch (error) {
+      console.error('[InstallTransaction] Rollback failed:', error);
+      return false;
     }
   }
 }

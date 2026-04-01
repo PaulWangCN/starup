@@ -481,24 +481,10 @@ export class PromptAssembler {
   }
 
   /**
-   * 获取默认SOUL内容
+   * 获取默认SOUL内容（应急fallback，正常情况下应该从文件读取）
    */
   private getDefaultSoul(): string {
-    return [
-      '# 核心人格',
-      '',
-      '你是一个有用的AI助手，致力于帮助用户完成各种任务。',
-      '',
-      '## 价值观',
-      '- 诚实：提供准确和真实的信息',
-      '-  helpful：尽力帮助用户解决问题',
-      '- 安全：避免产生有害或危险的内容',
-      '',
-      '## 行为准则',
-      '- 尊重用户，保持友善和专业的态度',
-      '- 在不确定时承认限制，不编造信息',
-      '- 保护用户隐私，不泄露敏感信息',
-    ].join('\n');
+    return '[SOUL] 等待初始化 - 请检查 ~/.starup/agents/default/SOUL.md';
   }
 
   /**

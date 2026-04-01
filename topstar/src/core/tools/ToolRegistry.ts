@@ -3,6 +3,8 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { metaInstallerSkill } from '../skills/MetaInstallerSkill';
+import { skillhubCLI } from '../skills/SkillhubCLI';
 
 const execAsync = promisify(exec);
 
@@ -340,12 +342,98 @@ export class ToolRegistry {
           success: false,
           error: 'Web search not configured',
           suggestion: '建议安装 search skill 来启用网络搜索功能',
-          installCommand: 'claw install search',
+          installCommand: 'skillhub install search',
           data: {
             query: args.query,
-            message: '网络搜索功能需要通过安装 Skill 来启用。运行 "claw install search" 安装搜索技能。',
+            message: '网络搜索功能需要通过安装 Skill 来启用。运行 "skillhub install search" 或 "startup skill install search" 安装搜索技能。',
           },
         };
+      },
+    });
+
+    // install_skill: 安装 Skill
+    this.register({
+      name: 'install_skill',
+      description: `安装 Skill 来扩展系统功能。
+
+【工作流程 - 自动执行】
+1. 检查 SkillHub CLI 是否已安装
+2. 如未安装，自动尝试安装 SkillHub CLI（无需用户干预）
+3. 使用 SkillHub CLI 安装指定 Skill
+4. 如失败，回退到内部 InstallManager 尝试安装
+5. 返回安装结果
+
+【使用方式】
+直接调用此工具，传入 skill_name，无需告知用户中间步骤
+
+【示例】
+用户："安装 web_search skill"
+你：调用 install_skill({"skill_name": "web_search"})
+然后直接告知结果即可`,
+      parameters: [
+        { name: 'skill_name', type: 'string', description: 'Skill 名称或 ID，如 "web_search", "weather", "translator"', required: true },
+        { name: 'version', type: 'string', description: '版本号，如 "1.0.0"，不指定则安装最新版', required: false },
+      ],
+      handler: async (args, session) => {
+        const skillName = args.skill_name;
+        const version = args.version;
+
+        try {
+          // 检查 SkillHub CLI 是否已安装
+          let skillhubInstalled = await skillhubCLI.isInstalled();
+          
+          // 如果未安装，尝试自动安装
+          if (!skillhubInstalled) {
+            console.log('[install_skill] SkillHub CLI not found, attempting auto-install...');
+            const autoInstallResult = await skillhubCLI.autoInstall();
+            
+            if (autoInstallResult.success) {
+              console.log('[install_skill] SkillHub CLI auto-installed successfully');
+              skillhubInstalled = true;
+            } else {
+              console.warn('[install_skill] Auto-install failed:', autoInstallResult.message);
+            }
+          }
+          
+          // 使用 SkillHub CLI 安装
+          if (skillhubInstalled) {
+            const result = await skillhubCLI.install(skillName, version);
+            if (result.success) {
+              return {
+                success: true,
+                data: {
+                  skill_id: result.skillId,
+                  version: result.version,
+                  message: `已成功通过 SkillHub 安装 ${skillName}`,
+                },
+              };
+            }
+          }
+
+          // 回退到使用 MetaInstallerSkill
+          const result = await metaInstallerSkill.install(
+            {
+              skill_hint: skillName,
+              version: version,
+            },
+            {
+              session,
+              recentMessages: [],
+              userPreferences: {},
+            }
+          );
+
+          return {
+            success: result.success,
+            data: result.data,
+            error: result.success ? undefined : result.message,
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: `安装失败: ${error instanceof Error ? error.message : String(error)}`,
+          };
+        }
       },
     });
   }
