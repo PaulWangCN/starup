@@ -293,22 +293,21 @@ export class ToolRegistry {
     // web_search: 网络搜索
     this.register({
       name: 'web_search',
-      description: '执行网络搜索获取信息。',
+      description: '执行网络搜索获取信息。如果搜索功能未配置，会建议安装 search skill。',
       parameters: [
         { name: 'query', type: 'string', description: '搜索查询', required: true },
         { name: 'limit', type: 'number', description: '结果数量', required: false, default: 5 },
       ],
       handler: async (args) => {
-        // 这里需要接入实际的搜索API
-        // 目前返回模拟结果
+        // 提示用户安装 search skill
         return {
-          success: true,
+          success: false,
+          error: 'Web search not configured',
+          suggestion: '建议安装 search skill 来启用网络搜索功能',
+          installCommand: 'claw install search',
           data: {
             query: args.query,
-            results: [
-              { title: 'Search API not configured', url: '', snippet: 'Please configure web search API in .env file (BING_API_KEY or SERPAPI_KEY)' },
-            ],
-            note: 'To enable web search, add BING_API_KEY=your_key to .env file',
+            message: '网络搜索功能需要通过安装 Skill 来启用。运行 "claw install search" 安装搜索技能。',
           },
         };
       },
