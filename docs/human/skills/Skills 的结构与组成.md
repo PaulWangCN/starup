@@ -1,0 +1,209 @@
+# Skills 的结构与组成
+
+一个 Skill 是一个 工程化的文件夹，其核心是 SKILL.md 文件。本节详细介绍官方的文件格式和创建流程。
+
+## 6.2.1 标准目录结构
+
+一个典型的 Skill 文件夹结构如下：
+
+```
+my-skill/
+├── SKILL.md             # 核心文件：元数据 + 指令
+├── scripts/             # 可选：可执行脚本
+│   └── process.py
+├── resources/           # 可选：参考文档、模板
+│   └── template.docx
+└── examples/            # 可选：示例输入输出
+    ├── input_1.txt
+    └── output_1.txt
+```
+
+最简形式：一个 Skill 只需要一个 SKILL.md 文件即可，其他目录都是可选的。
+
+## 6.2.2 SKILL.md 文件格式
+
+SKILL.md 采用 YAML Frontmatter + Markdown Body 的格式：
+
+```yaml
+---
+name: my-skill-name
+description: "Skill 的触发描述，决定何时被调用"
+license: Complete terms in LICENSE.txt
+---
+
+# Skill 的核心指令
+
+## Overview
+这里描述 Skill 的功能概述...
+
+## Instructions
+具体的执行指令...
+```
+
+### 核心字段说明
+
+| 字段 | 作用 | 要求 |
+|------|------|------|
+| name | Skill 的唯一标识符 | 小写，使用连字符，如 pdf-editor |
+| description | 最关键字段：决定 Skill 何时被触发 | 详细描述能力、触发场景、边界条件 |
+| license | 许可证信息 | 可选 |
+
+重要提示：只有 name 和 description 会影响 Skill 的触发逻辑，正文内容只在 Skill 被激活后才会被读取。
+
+## 6.2.3 Description 编写指南
+
+description 是 Skill 最关键的部分，它决定了 Claude 何时会调用这个 Skill。
+
+### 弱 Description 示例
+
+```
+This skill helps with PDFs and documents.
+```
+
+问题：太模糊，Claude 不知道具体能做什么、何时该用。
+
+### 强 Description 示例
+
+```
+Comprehensive PDF manipulation toolkit for extracting text and tables,
+creating new PDFs, merging/splitting documents, and handling forms.
+When Claude needs to fill in a PDF form or programmatically process,
+generate, or analyze PDF documents at scale. Use for document workflows
+and batch operations. Not for simple PDF viewing or basic conversions.
+```
+
+这个强版本包含了：
+
+- **具体能力**：extract, create, merge, split, handle forms
+- **触发场景**：fill in forms, batch operations
+- **明确边界**：not for simple viewing（告诉 Claude 何时不该用）
+
+### 用 SkillsBench 反推 Description 的写法
+
+SkillsBench 的一个关键发现是：聚焦型 Skill 往往优于"大而全"的文档打包。
+
+落到 description 的写法上，意味着：
+
+- 不要写成泛泛的"这个 Skill 很强，能处理各种文档、表格、数据、自动化任务"；
+- 应该明确写出 **任务类**、**触发条件** 和 **排除边界**；
+- 最好让 Claude 一眼知道"什么时候该调用、什么时候不该调用"。
+
+换句话说，description 不是广告文案，而是 **路由规则**。它越像"精确的任务分流标签"，触发质量越高；越像"功能大全"，误触发和负迁移概率越高。
+
+## 6.2.4 创建 Skill 的六步工作流
+
+Anthropic 官方推荐采用工程化思维，通过六个标准化步骤来创建高质量 Skill：
+
+### 1. Understand：理解
+
+在动手之前，先明确 Skill 的核心目标。问自己：
+
+- 解决什么痛点？
+- "Best result" 是什么样的？
+- "Worst case" 可能发生什么？
+
+### 2. Plan：规划
+
+设计 Skill 的架构，特别是 **文件结构**：
+
+- 哪些内容应该放在 SKILL.md（Prompt）？
+- 哪些逻辑应该写成 Python 脚本（Script）？
+- 哪些参考文档需要放入 resources/ 目录？
+
+设计原则：优先使用脚本处理确定性任务（Low DoF），使用 Prompt 处理创造性任务（High DoF）。
+
+### 3. Init：初始化
+
+不要从零手写 YAML。使用脚本（如 init_skill.py）生成标准脚手架，确保元数据格式正确。
+
+```bash
+python scripts/init_skill.py my-new-skill
+```
+
+### 4. Edit：编写
+
+按正确顺序填充内容：
+
+- **先写资源**：编写 scripts/*.py 和 resources/。这确保 Prompt 可以指向真实存在的文件。
+- **后写指令**：编写 SKILL.md，即"胶水层"。
+
+### 5. Validate：验证
+
+在提交之前，必须通过验证脚本（如 quick_validate.py）：
+
+- 检查 YAML 语法
+- 检查文件引用路径
+- 模拟基本调用
+
+### 6. Iterate：迭代
+
+Skill 不是一次性工作。根据使用反馈（如"为什么这个 Skill 没被触发？"或"为什么执行错了？"）不断微调 description 和 instructions。
+
+## 6.2.5 Skill 上传方式
+
+根据使用场景，有三种上传方式：
+
+### Claude.ai（消费者）
+
+进入 Settings → Features → Skills，上传自定义 Skill 文件夹。
+
+### Claude Code（开发者）
+
+将 Skill 文件夹放置在以下任一位置：
+
+```
+~/.claude/skills/my-skill/SKILL.md      # 全局 Skill
+./skills/my-skill/SKILL.md              # 项目级 Skill
+```
+
+Claude 会自动发现并加载这些 Skills。
+
+### API（开发者）
+
+使用 /v1/skills 端点上传：
+
+```bash
+curl -X POST "https://api.anthropic.com/v1/skills" \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "anthropic-beta: skills-2025-10-02" \
+  -F "display_title=My Skill Name" \
+  -F "files[]=@my-skill/SKILL.md;filename=my-skill/SKILL.md"
+```
+
+## 6.2.6 高级模式：渐进式披露
+
+对于复杂的 Skills，避免将所有信息放在一个巨大的 SKILL.md 中。采用 **菜单模式**：
+
+```
+my-complex-skill/
+├── SKILL.md              # 概述 + 目录索引
+├── workflow-a.md         # 流程 A 的详细指令
+├── workflow-b.md         # 流程 B 的详细指令
+└── workflow-c.md         # 流程 C 的详细指令
+```
+
+在 SKILL.md 中使用相对路径引用：
+
+```markdown
+## Available Workflows
+
+### Workflow A
+For creating new documents, read the `workflow-a.md` reference file.
+
+### Workflow B
+For editing existing documents, read the `workflow-b.md` reference file.
+```
+
+Claude 会根据当前任务，只读取相关的子文件，保持上下文精简。
+
+## 结构设计的经验原则
+
+结合 SkillsBench 与 Claude 生态中的实践，一个高质量 Skill 往往具有如下结构特征：
+
+- **正文短而硬**：SKILL.md 聚焦步骤、边界、检查项，不承载大段背景知识。
+- **资源按需加载**：大块知识放到 resources/ 或 examples/，只有需要时才读取。
+- **模块数量受控**：通常 2 到 3 个强相关模块就足够；模块过多会让触发和执行都变得含糊。
+- **过程优先于答案**：优先给"排查顺序、验证步骤、常见陷阱"，而不是给一堆任务实例的最终答案。
+
+如果一个 Skill 需要依赖十几个子文件、几十页说明和多套互相竞争的流程，那么与其说它是 Skill，不如说它更像一个尚未完成拆分的信息仓库。

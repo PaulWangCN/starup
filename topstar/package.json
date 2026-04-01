@@ -1,0 +1,38 @@
+{
+  "name": "topstar",
+  "version": "1.0.0",
+  "description": "AI助手运行时环境与集成平台",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.ts",
+    "chat": "ts-node src/cli.ts",
+    "test": "jest"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "llm",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@types/node": "^22.13.17",
+    "@types/uuid": "^10.0.0",
+    "axios": "^1.8.4",
+    "chalk": "^4.1.2",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "ora": "^5.4.1",
+    "typescript": "^5.8.2",
+    "uuid": "^13.0.0",
+    "yaml": "^2.8.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.1",
+    "@types/ora": "^3.1.0",
+    "ts-node": "^10.9.2"
+  }
+}

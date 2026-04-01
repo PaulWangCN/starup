@@ -1,0 +1,309 @@
+# 如何创建自定义 Skills
+
+当内置 Skills 无法满足特定需求时，就是发挥创造力的时候了。本节将通过三个官方示例，深入讲解如何创建高质量的自定义 Skill。
+
+## 6.4.0 Agent Skills 的完整解析：SKILL.md 结构与渐进式披露
+
+Agent Skills 是 Anthropic 为了让 Agent 获得专业化能力而设计的机制。一个 Skill 本质上是一个包含 SKILL.md 文件的目录，其中包含了指令、脚本和资源。要创建有效的 Skill，首先要理解 SKILL.md 的完整生命周期。
+
+### SKILL.md 的YAML前置信息（Frontmatter）
+
+每个 SKILL.md 必须以YAML前置信息开始，包含两个关键字段：
+
+```yaml
+---
+name: pdf_processing
+description: |
+  Comprehensive PDF manipulation including form filling, content extraction,
+  and page manipulation. Use this when Claude needs to: (1) Extract text
+  from PDF files, (2) Fill out PDF forms, (3) Merge or split PDFs,
+  (4) Analyze PDF structure and contents.
+---
+```
+
+- **name**：技能的唯一标识，在系统启动时加载进提示词
+- **description**：简洁但完整的概述，帮助 Claude 决定何时使用这个 Skill
+
+这两个字段合在一起构成了第一级渐进式披露 ——Claude 在启动时就知道有哪些 Skill 可用，以及大致的用途，但还不需要加载完整的细节。
+
+### 渐进式披露的三个层级
+
+Agent Skills 采用了一个精妙的架构来管理上下文：
+
+**层级一：元数据（启动时加载）**
+
+- 所有已安装 Skill 的名称和描述（几百字节）
+- 让 Claude 知道"有哪些工具可用"
+- 触发：应用启动时
+
+**层级二：SKILL.md 的主体（按需加载）**
+
+- 当 Claude 认为某个 Skill 可能相关时，调用 bash 工具读取该 Skill 的完整 SKILL.md
+- 包含详细的使用指南、工作流说明、常见场景
+- 触发：Claude 决定该 Skill 与当前任务有关
+
+**层级三及以上：附加文件（深度按需加载）**
+
+- SKILL.md 中引用的其他文件：reference.md、forms.md、examples.py 等
+- Claude 可以根据进展选择性地读取这些文件
+- 例如：在处理 PDF 表单时才读取 forms.md，而处理文本提取时才读取 text_extraction.md
+
+### 实例：PDF Skill 的层级结构
+
+```
+pdf/
+├── SKILL.md          # 第一行是前置信息，包含name和description
+├── reference.md      # 引用：PDF API的详细参考
+├── forms.md          # 引用：表单填充的具体说明
+└── scripts/
+    └── extract_fields.py  # 代码：PDF字段提取脚本
+```
+
+当用户要求"从PDF中提取表单字段"时：
+
+1. Claude 读取元数据，发现有"pdf"Skill
+2. Claude 执行 cat pdf/SKILL.md，加载主体内容
+3. Claude 看到 SKILL.md 提到"forms.md 包含表单处理说明"
+4. Claude 执行 cat pdf/forms.md，加载表单特定信息
+5. Claude 可能执行 python pdf/scripts/extract_fields.py，让脚本做低级操作
+
+这种设计的好处：
+
+- **初始上下文轻量**：即使装了100个 Skill，启动时也只消耗几KB token
+- **智能加载**：只加载与当前任务相关的细节
+- **灵活性**：Skill 可以包含任意大的代码或指令，不受上下文限制
+
+### SKILL.md 编写的关键原则
+
+**在 YAML 前置信息中描述"何时"而不仅是"是什么"**
+
+不好的写法：
+
+```yaml
+description: PDF 处理工具
+```
+
+好的写法：
+
+```yaml
+description: |
+  Comprehensive PDF manipulation including form filling, text extraction,
+  and page manipulation. Use this when Claude needs to: (1) Fill PDF forms,
+  (2) Extract structured data from PDFs, (3) Analyze document contents.
+```
+
+**主体部分应该包含工作流或决策树**
+
+不仅仅列举功能，而是提供清晰的"在这种情况下做X，在那种情况下做Y"的指导。
+
+**使用引用来分层内容**
+
+将不相关的细节移到单独的文件中，保持主 SKILL.md 清洁。例如：
+
+SKILL.md 主体:
+
+```markdown
+## Form Handling
+
+For detailed form field instructions, see [forms.md](forms.md).
+
+## Text Extraction
+
+For extraction examples and edge cases, see [reference.md](reference.md).
+```
+
+**在 SKILL.md 中集成代码示例**
+
+```markdown
+## Text Extraction Example
+
+Claude can run this Python script to extract text:
+
+```python
+import pdf  # 假设有 pdf 库
+content = pdf.extract_text("file.pdf")
+print(content)
+```
+```
+
+> 融入自 Anthropic 的《Equipping agents for the real world with Agent Skills》中关于 SKILL.md 结构和渐进式披露的设计原则
+
+## 6.4.2 核心设计原则：自由度与确定性
+
+在编写 Skill 之前，首先要判断任务的属性。Anthropic 的研究员提出了 **"自由度（Degrees of Freedom）"** 的概念：
+
+- **高自由度任务（High DoF）**：需要创意、适应性或模糊推理。
+  - 例如：写一首诗、设计一个网页布局、总结一篇文章。
+  - **最佳实现**：使用 Markdown 文本指令。告诉 Claude 目标和风格，留出空间让模型发挥。
+
+- **低自由度任务（Low DoF）**：需要精确格式、严密逻辑或零容错。
+  - 例如：生成特定 schema 的 JSON、执行数学计算、转换文件格式。
+  - **最佳实现**：使用 Python 脚本。不要试图用 Prompt 强迫模型去"模拟"计算机的行为，直接给它工具（脚本）。
+
+### 黄金法则：
+
+> 如果任务逻辑是"脆弱"的（改一个字就报错），请写代码（Script）；如果任务需要"弹性"（多种结果都可接受），请写 Prompt（Instruction）。
+
+## 6.4.3 示例一：DOCX 文档处理 Skill
+
+这是 Anthropic 官方 Skills 仓库中的一个经典案例，展示了如何处理复杂的工作流分支。
+
+### SKILL.md 文件
+
+```markdown
+---
+name: docx
+description: "Comprehensive document creation, editing, and analysis with
+support for tracked changes, comments, formatting preservation, and text
+extraction. When Claude needs to work with professional documents (.docx
+files) for: (1) Creating new documents, (2) Modifying or editing content,
+(3) Working with tracked changes, (4) Adding comments, or any other
+document tasks"
+license: Proprietary
+---
+
+# DOCX creation, editing, and analysis
+
+## Overview
+A user may ask you to create, edit, or analyze the contents of a .docx
+file. A .docx file is essentially a ZIP archive containing XML files
+and other resources that you can read or edit.
+
+## Workflow Decision Tree
+
+### Reading/Analyzing Content
+Use "Text extraction" or "Raw XML access" sections below
+
+### Creating New Document
+Use "Creating a new Word document" workflow
+
+### Editing Existing Document
+- **Your own document + simple changes**
+  Use "Basic OOXML editing" workflow
+- **Someone else's document**
+  Use **"Redlining workflow"** (recommended default)
+- **Legal, academic, business, or government docs**
+  Use **"Redlining workflow"** (required)
+```
+
+### 设计亮点
+
+- **决策树结构**：根据任务类型（读取/创建/编辑）路由到不同流程
+- **渐进式披露**：主文件提供概述，详细流程放在独立的 workflow-*.md 文件中
+- **明确的边界**：区分了"自己的文档"和"别人的文档"应使用不同流程
+
+## 6.4.4 示例二：品牌指南 Skill
+
+这个示例展示了如何封装企业特有的设计规范。
+
+```markdown
+---
+name: brand-guidelines
+description: "Applies Anthropic's official brand colors and typography to
+any sort of artifact that may benefit from having Anthropic's look-and-feel.
+Use it when brand colors or style guidelines, visual formatting, or company
+design standards apply."
+license: Complete terms in LICENSE.txt
+---
+
+# Anthropic Brand Styling
+
+## Colors
+
+**Main Colors:**
+- Dark: `#141413` - Primary text and dark backgrounds
+- Light: `#faf9f5` - Light backgrounds and text on dark
+- Mid Gray: `#b0aea5` - Secondary elements
+
+**Accent Colors:**
+- Orange: `#d97757` - Primary accent
+- Blue: `#6a9bcc` - Secondary accent
+- Green: `#788c5d` - Tertiary accent
+
+## Typography
+- **Headings**: Poppins (with Arial fallback)
+- **Body Text**: Lora (with Georgia fallback)
+
+## Text Styling
+- Headings (24pt+): Poppins font
+- Body text: Lora font
+- Smart color selection based on background
+```
+
+### 设计亮点
+
+- **精确信息**：提供 Claude 无法内置的具体数值（十六进制颜色码、字体名称）
+- **实用主义**：不需要复杂逻辑，直接给出可执行的规范
+- **Fallback 策略**：考虑到字体可能缺失，提供了备选方案
+
+## 6.4.5 示例三：前端设计 Skill
+
+这个高级示例展示了如何约束创意输出。
+
+```markdown
+---
+name: frontend-design
+description: "Create distinctive, production-grade frontend interfaces with
+high design quality. Use this skill when the user asks to build web
+components, pages, or applications. Generates creative, polished code that
+avoids generic AI aesthetics."
+license: Complete terms in LICENSE.txt
+---
+
+# Frontend Design Skill
+
+## Design Thinking
+
+Before coding, commit to a BOLD aesthetic direction:
+- **Purpose**: What problem does this interface solve?
+- **Tone**: Pick an extreme: brutally minimal, maximalist chaos,
+  retro-futuristic, organic/natural, luxury/refined, playful/toy-like...
+- **Differentiation**: What makes this UNFORGETTABLE?
+
+## Typography
+Choose fonts that are beautiful, unique, and interesting.
+**AVOID**: Arial, Inter, Roboto, system fonts
+**PREFER**: Distinctive display fonts paired with refined body fonts
+
+## Color & Theme
+Dominant colors with sharp accents outperform timid, evenly-distributed
+palettes. Use CSS variables for consistency.
+
+## NEVER Use
+- Overused font families (Inter, Roboto, Arial)
+- Clichéd color schemes (purple gradients on white)
+- Predictable layouts and component patterns
+- Cookie-cutter design that lacks context-specific character
+```
+
+### 设计亮点
+
+- **反面约束**：明确列出"不要做什么"，避免生成千篇一律的 AI 风格
+- **鼓励创意**：使用激励性语言（"BOLD", "UNFORGETTABLE"）引导高质量输出
+- **思考框架**：要求先思考再编码，提升输出的针对性
+
+## 6.4.6 Description 对比：强 vs 弱
+
+以下是影响 Skill 触发准确性的关键因素：
+
+| 弱 Description | 强 Description |
+|---------------|----------------|
+| "Helps with PDFs" | "Extract tables from PDFs, merge/split documents, fill forms. Use for batch processing. Not for simple viewing." |
+| "Code review skill" | "Reviews code for OWASP Top 10 vulnerabilities, enforces company style guide, outputs severity-ranked findings table." |
+| "Writing helper" | "Transforms rough notes into polished blog posts following SEO best practices. Outputs markdown with frontmatter." |
+
+### 核心原则：
+
+- 使用 **动词** 描述能力（extract, merge, transform）
+- 说明 **触发场景**（when to use）
+- 划定 **边界**（not for...）
+
+## 6.4.7 测试矩阵
+
+创建 Skill 后，使用以下矩阵进行系统测试：
+
+| 测试类型 | 示例 | 期望结果 |
+|---------|------|---------|
+| 正常操作 | 使用 docx skill 创建合同 | 生成带格式的 .docx 文件 |
+| 边缘情况 | 输入只有表格没有文字的文档 | 正确处理或提示需要补充信息 |
+| 越界请求 | 请求 docx skill 分析 PDF | 不应触发，提示使用 PDF skill |
