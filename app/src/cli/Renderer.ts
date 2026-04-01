@@ -22,7 +22,7 @@ export class Renderer {
   showWelcome(): void {
     console.clear();
     console.log(this.colors.border('╔══════════════════════════════════════════╗'));
-    console.log(this.colors.border('║') + chalk.bold.white('     TopStar - AI Terminal Assistant      ') + this.colors.border('║'));
+    console.log(this.colors.border('║') + chalk.bold.white('     StarUp - AI Terminal Assistant      ') + this.colors.border('║'));
     console.log(this.colors.border('╚══════════════════════════════════════════╝'));
     console.log();
   }
@@ -209,7 +209,7 @@ export class Renderer {
    */
   showGoodbye(): void {
     console.log();
-    console.log(this.colors.info('感谢使用 TopStar！再见！'));
+    console.log(this.colors.info('感谢使用 StarUp！再见！'));
     console.log();
   }
 }

@@ -1,4 +1,4 @@
-# TopStar - AI 助手运行时环境
+# StarUp - AI 助手运行时环境
 
 StarUp 的核心运行时环境，为 AI 助手提供"操作系统"级别的基础设施。
 
@@ -79,7 +79,7 @@ npm run chat
 
 ```
 ╔══════════════════════════════════════════╗
-║     TopStar - AI Terminal Assistant      ║
+║     StarUp - AI Terminal Assistant       ║
 ╚══════════════════════════════════════════╝
 
 [SYSTEM] Loaded 3 skills, 5 tools
@@ -87,7 +87,7 @@ npm run chat
 
 > 你好
 
-AI: 你好！我是 TopStar AI 助手。有什么可以帮助你的吗？
+AI: 你好！我是 StarUp AI 助手。有什么可以帮助你的吗？
 
 > 读取 README.md 文件
 
@@ -104,7 +104,7 @@ AI: 我来帮你读取文件...
 
 > /exit
 
-感谢使用 TopStar！再见！
+感谢使用 StarUp！再见！
 ```
 
 ### 斜杠命令
