@@ -98,7 +98,7 @@ export class LLMService {
   ): Promise<{ content: string; tool_calls?: any[] }> {
     const url = this.config.baseUrl || 'https://api.openai.com/v1/chat/completions';
 
-    const payload = this.buildPayload(messages, tools, 'gpt-4');
+    const payload = this.buildPayload(messages, tools);
 
     try {
       const response = await axios.post(url, payload, {
@@ -143,7 +143,7 @@ export class LLMService {
     callbacks?: { onChunk?: (chunk: string) => void }
   ): Promise<{ content: string; tool_calls?: any[] }> {
     const url = this.config.baseUrl || 'https://api.openai.com/v1/chat/completions';
-    const payload = this.buildPayload(messages, tools, 'gpt-4');
+    const payload = this.buildPayload(messages, tools);
     payload.stream = true;
 
     return this.parseSSEStream(url, payload, callbacks);
@@ -154,11 +154,10 @@ export class LLMService {
    */
   private buildPayload(
     messages: ConversationMessage[],
-    tools?: any[],
-    defaultModel?: string
+    tools?: any[]
   ): any {
     const payload: any = {
-      model: this.config.model || defaultModel || 'deepseek-chat',
+      model: this.config.model,
       messages: messages.map((m) => ({
         role: m.role,
         content: m.content,

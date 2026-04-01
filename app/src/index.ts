@@ -49,13 +49,17 @@ export class StarUpCore {
     this.toolRegistry = toolRegistry;
     this.skillRegistry = skillRegistry;
 
+    const llmProvider = (process.env.LLM_PROVIDER as any) || 'deepseek';
+    const llmModel = process.env.LLM_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+
     this.config = {
       llm: {
-        provider: 'deepseek',
-        apiKey: process.env.DEEPSEEK_API_KEY || '',
-        model: 'deepseek-chat',
-        temperature: 0.7,
-        maxTokens: 8192,
+        provider: llmProvider,
+        apiKey: process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY || '',
+        model: llmModel,
+        baseUrl: process.env.LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL,
+        temperature: parseFloat(process.env.LLM_TEMPERATURE || '0.7'),
+        maxTokens: parseInt(process.env.LLM_MAX_TOKENS || '8192', 10),
       },
       channels: [],
       cron: [],

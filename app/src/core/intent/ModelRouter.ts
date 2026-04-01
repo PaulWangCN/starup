@@ -325,49 +325,47 @@ export class ModelRouter {
    * 获取默认配置
    */
   private getDefaultConfig(): ModelRoutingConfig {
+    const defaultModel = process.env.LLM_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+    const codeModel = process.env.LLM_MODEL_CODE || defaultModel;
+
     return {
       intentMappings: {
-        // 代码生成使用 deepseek-coder
         code_generation: {
-          model: 'deepseek-coder',
+          model: codeModel,
           temperature: 0.2,
           maxTokens: 4096,
           priority: 10,
         },
-        // 分析任务使用更强的模型
         analysis: {
-          model: 'deepseek-chat',
+          model: process.env.LLM_MODEL_ANALYSIS || defaultModel,
           temperature: 0.5,
           maxTokens: 2048,
           priority: 9,
         },
-        // 搜索任务
         search: {
-          model: 'deepseek-chat',
+          model: process.env.LLM_MODEL_SEARCH || defaultModel,
           temperature: 0.7,
           maxTokens: 2048,
           priority: 5,
         },
-        // 解释任务
         explanation: {
-          model: 'deepseek-chat',
+          model: process.env.LLM_MODEL_EXPLANATION || defaultModel,
           temperature: 0.7,
           maxTokens: 2048,
           priority: 5,
         },
-        // 一般对话
         general: {
-          model: 'deepseek-chat',
+          model: process.env.LLM_MODEL_GENERAL || defaultModel,
           temperature: 0.8,
           maxTokens: 1024,
           priority: 1,
         },
       },
-      defaultModel: 'deepseek-chat',
-      fallbackModel: 'deepseek-chat',
+      defaultModel,
+      fallbackModel: process.env.LLM_FALLBACK_MODEL || defaultModel,
       dailyQuota: {
-        'deepseek-chat': 1000,
-        'deepseek-coder': 500,
+        [defaultModel]: 1000,
+        [codeModel]: 500,
       },
     };
   }
