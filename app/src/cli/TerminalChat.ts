@@ -145,7 +145,7 @@ export class TerminalChat {
    * 确保 Agent 配置存在
    */
   private async ensureAgentConfig(): Promise<void> {
-    const agentPath = path.join(process.env.HOME || '.', '.starup', 'agents', 'default');
+    const agentPath = path.join(process.env.HOME || '.', '.starup');
     
     try {
       await fs.mkdir(agentPath, { recursive: true });

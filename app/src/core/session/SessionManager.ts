@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import path from 'path';
 import {
   Session,
   SessionType,
@@ -47,7 +48,7 @@ export class SessionManager {
       memory: {
         shortTerm: [],
         dailyLog: this.getDailyLogPath(),
-        longTerm: 'MEMORY.md',
+        longTerm: path.join(process.env.HOME || process.env.USERPROFILE || '.', '.starup', 'MEMORY.md'),
       },
       allowedTools: ['read', 'write', 'edit', 'exec', 'web_search'],
       memoryAccess: 'write',

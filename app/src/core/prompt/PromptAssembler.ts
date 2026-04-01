@@ -116,7 +116,7 @@ export class PromptAssembler {
 
   private getAgentPath(agentId: string): string {
     const homeDir = process.env.HOME || process.env.USERPROFILE || '.';
-    return path.join(homeDir, '.starup', 'agents', agentId);
+    return path.join(homeDir, '.starup');
   }
 
   private async loadLayer1(agentPath: string): Promise<string> {
