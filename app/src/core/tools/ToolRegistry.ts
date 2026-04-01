@@ -193,9 +193,16 @@ export class ToolRegistry {
       ],
       handler: async (args) => {
         const timeout = Math.min(args.timeout || 60, 300);
-        const dangerousCommands = ['rm -rf /', 'mkfs', 'dd if=/dev/zero', 'format', 'del /f /s /q'];
-        for (const dangerous of dangerousCommands) {
-          if (args.command.toLowerCase().includes(dangerous)) {
+        // 使用正则表达式精确匹配危险命令（避免子串误判，如 python format 方法）
+        const dangerousPatterns = [
+          /\brm\s+-rf\s+\/\b/,           // rm -rf /
+          /\bmkfs\b/,                     // mkfs
+          /\bdd\s+if=\/dev\/zero/,        // dd if=/dev/zero
+          /\bformat\s+(C:|D:|E:|F:)/i,     // format C: (Windows)
+          /\bdel\s+\/f\s+\/s\s+\/q\s+\\/i, // del /f /s /q \
+        ];
+        for (const pattern of dangerousPatterns) {
+          if (pattern.test(args.command)) {
             return { success: false, error: 'Dangerous command blocked for security' };
           }
         }
