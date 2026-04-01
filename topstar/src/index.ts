@@ -114,6 +114,15 @@ export class StarUpCore {
 
       // 处理工具调用
       if (response.tool_calls && response.tool_calls.length > 0) {
+        // 先把 assistant 的消息（包含 tool_calls）添加到会话
+        this.sessionManager.addMessage(sessionId, {
+          role: 'assistant',
+          content: response.content || '',
+          tool_calls: response.tool_calls,
+          timestamp: Date.now(),
+        });
+
+        // 执行工具调用
         for (const toolCall of response.tool_calls) {
           const result = await this.toolRegistry.execute(
             toolCall.function.name,
@@ -136,8 +145,22 @@ export class StarUpCore {
           tools
         );
         
+        // 添加 assistant 的最终回复到会话
+        this.sessionManager.addMessage(sessionId, {
+          role: 'assistant',
+          content: finalResponse.content,
+          timestamp: Date.now(),
+        });
+        
         return finalResponse.content;
       }
+      
+      // 没有工具调用，直接添加 assistant 回复到会话
+      this.sessionManager.addMessage(sessionId, {
+        role: 'assistant',
+        content: response.content,
+        timestamp: Date.now(),
+      });
 
       return response.content;
     }
