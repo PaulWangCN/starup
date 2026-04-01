@@ -113,7 +113,6 @@ export class TerminalChat {
       return assembled.content;
     } catch (error) {
       console.warn('[TerminalChat] Failed to generate system prompt:', error);
-      // 返回默认提示词
       return this.getDefaultSystemPrompt();
     }
   }
@@ -157,7 +156,6 @@ export class TerminalChat {
       try {
         await fs.access(soulPath);
       } catch {
-        // 创建默认 SOUL.md
         const defaultSoul = `# SOUL.md
 
 ## 你
@@ -246,7 +244,6 @@ export class TerminalChat {
       try {
         await fs.access(identityPath);
       } catch {
-        // 创建默认 IDENTITY.md
         const defaultIdentity = [
           '# IDENTITY - 身份标识',
           '',
@@ -303,7 +300,7 @@ export class TerminalChat {
       return;
     }
 
-    // 处理消息（用户输入已由 readline 显示）
+    // 处理消息
     await this.processMessage(trimmed);
   }
 
@@ -351,29 +348,66 @@ export class TerminalChat {
       return;
     }
 
-    // 创建 loading 动画
-    const spinner = ora({
-      text: '思考中...',
-      color: 'cyan',
-    }).start();
+    const thinkingLines: string[] = [];
+    let currentSpinner: import('ora').Ora | null = null;
 
     try {
-      // 处理消息，支持多轮工具调用
       const result = await this.core.processMessage(
-        this.mainSessionId, 
+        this.mainSessionId,
         message,
-        (toolName, toolArgs) => {
-          // 工具调用时更新 spinner 文本
-          spinner.text = `执行: ${toolName}...`;
+        {
+          onThinking: (content) => {
+            // 第一次思考时创建 spinner
+            if (thinkingLines.length === 0) {
+              currentSpinner = ora({
+                text: '思考中...',
+                color: 'cyan',
+              }).start();
+            }
+            thinkingLines.push(content);
+            // 更新 spinner 显示当前思考摘要
+            const summary = content.slice(0, 40).replace(/\n/g, ' ');
+            if (currentSpinner) {
+              currentSpinner.text = `思考中: ${summary}...`;
+            }
+          },
+          onToolCall: (name, args) => {
+            if (currentSpinner) {
+              currentSpinner.text = `调用工具: ${name}...`;
+            }
+          },
+          onToolResult: (name, result) => {
+            if (currentSpinner) {
+              const success = result.success ? '✓' : '✗';
+              currentSpinner.text = `工具 ${name} 返回: ${success}`;
+            }
+          },
         }
       );
 
-      spinner.stop();
+      (currentSpinner as any)?.stop();
 
-      // 显示 AI 回复
-      this.renderer.ai(result);
+      // 显示思考过程（灰色缩进显示）
+      if (thinkingLines.length > 0) {
+        console.log(chalk.gray('┌─ 思考过程 ──────────────────────'));
+        for (let i = 0; i < thinkingLines.length; i++) {
+          const line = thinkingLines[i];
+          const isLast = i === thinkingLines.length - 1;
+          const prefix = isLast ? '└─> ' : '├─ ';
+          // 只显示思考内容的第一行，避免太长
+          const summary = line.slice(0, 60).replace(/\n/g, ' ');
+          console.log(chalk.gray(`${prefix}${summary}${line.length > 60 ? '...' : ''}`));
+        }
+        console.log();
+      }
+
+      // 显示最终回复（带 AI 前缀）
+      console.log(chalk.green('🤖 AI:'));
+      console.log(result.finalReply);
+      console.log();
+
     } catch (error) {
-      spinner.stop();
+      (currentSpinner as any)?.stop();
       this.renderer.error(`处理消息失败: ${error}`);
     }
   }

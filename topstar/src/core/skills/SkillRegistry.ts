@@ -1,31 +1,25 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import YAML from 'yaml';
-import {
-  Skill,
-  SkillMetadata,
-  SkillPackage,
-  SkillManifest,
-  InstallSpec,
-  InstallOptions,
-  InstallResult,
-  ToolDefinition,
-  DependencyTree,
-} from '../../types';
+import { Skill, SkillPackage, SkillManifest, InstallResult } from '../../types';
 import { installManager } from './InstallManager';
-import { toolRegistry } from '../tools/ToolRegistry';
 
 /**
  * Skill 注册表（简化版）
- * 职责：
- * 1. 启动时扫描 skills 目录
- * 2. 加载 skill 的工具定义到 ToolRegistry
- * 3. 生成 skills_index.md 供 LLM 读取
- * 4. 定时重新扫描（每 30 秒）
+ *
+ * 设计理念：
+ * 1. 内置 skills：放在项目 skills/ 目录，系统启动时直接读取 SKILL.md 嵌入提示词
+ * 2. 用户 skills：放在 ~/.starup/skills/，扫描后写入 skills_index.md 作为扩展能力
+ * 3. 大模型根据 SKILL.md 的 description 自行判断何时使用
  */
 export class SkillRegistry {
-  private skills: Map<string, Skill> = new Map();
+  // 内置 skills（项目自带）
+  private builtinSkills: Map<string, Skill> = new Map();
+  // 用户安装的 skills
+  private userSkills: Map<string, Skill> = new Map();
+  // v1.2 manifest 格式的 packages
   private packages: Map<string, SkillPackage> = new Map();
+
   private builtinSkillsDir: string;
   private userSkillsDir: string;
   private skillsIndexPath: string;
@@ -43,32 +37,52 @@ export class SkillRegistry {
   }
 
   /**
-   * 初始化：扫描一次并启动定时器
+   * 初始化：加载内置 skills 和用户 skills
    */
   async initialize(): Promise<void> {
-    console.log('[SkillRegistry] Initializing...');
     await installManager.initialize();
+    // 加载内置 skills（直接嵌入提示词）
+    await this.loadBuiltinSkills();
+    // 加载用户 skills（写入索引文件）
     await this.rescan();
     this.startAutoScan();
-    console.log('[SkillRegistry] Initialized');
   }
 
   /**
-   * 重新扫描所有 skills
+   * 获取内置 skills 的完整描述（用于系统提示词）
+   */
+  getBuiltinSkillsDescription(): string {
+    if (this.builtinSkills.size === 0) {
+      return '';
+    }
+
+    const lines: string[] = ['## 内置 Skills（可直接使用）', ''];
+    for (const [id, skill] of this.builtinSkills) {
+      lines.push(`### ${skill.metadata.name}`);
+      lines.push(`- **ID**: ${id}`);
+      lines.push(`- **描述**: ${skill.metadata.description}`);
+      if (skill.content) {
+        lines.push('');
+        lines.push(skill.content);
+      }
+      lines.push('');
+    }
+    return lines.join('\n');
+  }
+
+  /**
+   * 重新扫描用户 skills 目录
    */
   async rescan(): Promise<void> {
-    this.skills.clear();
+    this.userSkills.clear();
     this.packages.clear();
 
-    // 扫描内置目录
-    await this.scanDirectory(this.builtinSkillsDir);
     // 扫描用户目录
-    await this.scanDirectory(this.userSkillsDir);
+    await this.scanDirectory(this.userSkillsDir, this.userSkills);
     // 同步 InstallManager 的已安装列表
     for (const pkg of installManager.list()) {
       if (!this.packages.has(pkg.manifest.id)) {
         this.packages.set(pkg.manifest.id, pkg);
-        await this.loadSkillTools(pkg.manifest.id, pkg.path);
       }
     }
 
@@ -76,15 +90,18 @@ export class SkillRegistry {
   }
 
   /**
-   * 扫描目录下的所有 skill
+   * 扫描目录加载 skills
    */
-  private async scanDirectory(dir: string): Promise<void> {
+  private async scanDirectory(dir: string, targetMap: Map<string, Skill>): Promise<void> {
     try {
       const entries = await fs.readdir(dir, { withFileTypes: true });
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
         const skillPath = path.join(dir, entry.name);
-        await this.loadSkillFromPath(skillPath);
+        const skill = await this.loadSkillFromPath(skillPath);
+        if (skill) {
+          targetMap.set(skill.id, skill);
+        }
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -94,13 +111,30 @@ export class SkillRegistry {
   }
 
   /**
-   * 从路径加载单个 skill
+   * 加载内置 skills
    */
-  private async loadSkillFromPath(skillPath: string): Promise<void> {
-    // 优先尝试 manifest.yaml (v1.2)
+  private async loadBuiltinSkills(): Promise<void> {
+    this.builtinSkills.clear();
+    await this.scanDirectory(this.builtinSkillsDir, this.builtinSkills);
+  }
+
+  /**
+   * 从路径加载单个 skill
+   * 最简单的形式：只需要 SKILL.md
+   */
+  private async loadSkillFromPath(skillPath: string): Promise<Skill | null> {
+    // 1. 尝试 SKILL.md（标准格式）
+    const skillFile = path.join(skillPath, 'SKILL.md');
+    try {
+      const content = await fs.readFile(skillFile, 'utf-8');
+      return this.parseSkillMd(content, skillPath);
+    } catch {
+      // 没有 SKILL.md，尝试 manifest.yaml
+    }
+
+    // 2. 尝试 manifest.yaml（v1.2 格式）
     const manifestPath = path.join(skillPath, 'manifest.yaml');
     try {
-      await fs.access(manifestPath);
       const content = await fs.readFile(manifestPath, 'utf-8');
       const manifest = YAML.parse(content) as SkillManifest;
 
@@ -121,82 +155,75 @@ export class SkillRegistry {
       };
 
       this.packages.set(manifest.id, pkg);
-      await this.loadSkillTools(manifest.id, skillPath);
-      return;
+
+      // 转换为 Skill 格式返回
+      return {
+        id: manifest.id,
+        metadata: {
+          name: manifest.name,
+          description: manifest.description,
+          version: manifest.version,
+        },
+        content: promptContent || manifest.description,
+        path: skillPath,
+      };
     } catch {
-      // 没有 manifest.yaml，尝试 SKILL.md (v1.1)
+      // 无效 skill 目录
     }
 
-    const skillFile = path.join(skillPath, 'SKILL.md');
-    try {
-      const content = await fs.readFile(skillFile, 'utf-8');
-      const skill = this.parseSkillMd(content, skillPath);
-      this.skills.set(skill.id, skill);
-      await this.loadSkillTools(skill.id, skillPath);
-    } catch {
-      // ignore invalid skill directories
-    }
+    return null;
   }
 
   /**
-   * 加载 skill 的工具定义
-   * 如果目录下有 index.js，尝试 require 并注册工具
+   * 解析 SKILL.md
+   * 格式：YAML Frontmatter + Markdown Body
    */
-  private async loadSkillTools(skillId: string, skillPath: string): Promise<void> {
-    const indexPath = path.join(skillPath, 'index.js');
-    try {
-      await fs.access(indexPath);
-      // 清除 require 缓存以便热重载
-      delete require.cache[require.resolve(indexPath)];
-      const module = require(indexPath);
-      if (module.tools && Array.isArray(module.tools)) {
-        for (const tool of module.tools) {
-          const toolDef: ToolDefinition = {
-            name: tool.name,
-            description: tool.description || '',
-            parameters: tool.parameters || [],
-            handler: tool.handler,
-          };
-          toolRegistry.register(toolDef);
-          toolRegistry.setToolSource(toolDef.name, skillId);
-        }
-      }
-    } catch {
-      // ignore
+  private parseSkillMd(content: string, skillPath: string): Skill {
+    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+
+    let metadata: { name: string; description: string; version?: string };
+    let skillContent: string;
+
+    if (frontmatterMatch) {
+      const yamlContent = YAML.parse(frontmatterMatch[1]);
+      metadata = {
+        name: yamlContent.name || path.basename(skillPath),
+        description: yamlContent.description || '',
+        version: yamlContent.version,
+      };
+      skillContent = frontmatterMatch[2].trim();
+    } else {
+      // 没有 frontmatter，使用文件名作为 name
+      metadata = {
+        name: path.basename(skillPath),
+        description: '',
+      };
+      skillContent = content.trim();
     }
 
-    // 也尝试 tools.json
-    const toolsJsonPath = path.join(skillPath, 'tools.json');
-    try {
-      const toolsContent = await fs.readFile(toolsJsonPath, 'utf-8');
-      const tools = JSON.parse(toolsContent);
-      if (Array.isArray(tools)) {
-        for (const tool of tools) {
-          // tools.json 只包含元信息，handler 需要在 index.js 中定义
-          // 如果已经通过 index.js 注册了，跳过
-          if (toolRegistry.get(tool.name)) continue;
-          console.warn(`[SkillRegistry] Tool "${tool.name}" has no handler in ${skillId}`);
-        }
-      }
-    } catch {
-      // ignore
-    }
+    return {
+      id: metadata.name,
+      metadata,
+      content: skillContent,
+      path: skillPath,
+    };
   }
 
   /**
-   * 生成 skills_index.md
+   * 生成用户 skills 索引文件
    */
   private async writeSkillsIndex(): Promise<void> {
     const lines: string[] = [
-      '# 可用 Skills 索引',
+      '# 用户安装的 Skills 索引',
       '',
-      '当用户提出以下类型的请求时，你可以调用对应的 skill 或使用相关工具：',
+      '以下 skills 已安装，可以在需要时使用：',
       '',
     ];
 
-    const all = [...Array.from(this.skills.values()), ...Array.from(this.packages.values())];
+    const all = [...Array.from(this.userSkills.values()), ...Array.from(this.packages.values())];
+
     if (all.length === 0) {
-      lines.push('_当前没有加载任何 skill。_');
+      lines.push('_当前没有用户安装的 skills。_');
     } else {
       for (const item of all) {
         if ('manifest' in item) {
@@ -213,7 +240,6 @@ export class SkillRegistry {
           const skill = item as Skill;
           lines.push(`## ${skill.metadata.name}`);
           lines.push(`- **ID**: ${skill.id}`);
-          lines.push(`- **版本**: ${skill.metadata.version || '1.0.0'}`);
           lines.push(`- **描述**: ${skill.metadata.description}`);
           if (skill.content) {
             lines.push('');
@@ -224,43 +250,23 @@ export class SkillRegistry {
       }
     }
 
+    // 添加使用提示
+    lines.push('---');
+    lines.push('');
+    lines.push('## 提示');
+    lines.push('如果以上 skills 无法满足需求，可以使用内置的 `clawhub` skill 搜索更多 skills。');
+    lines.push('例如："帮我搜索一个能处理 PDF 的 skill"');
+    lines.push('');
+
     await fs.mkdir(path.dirname(this.skillsIndexPath), { recursive: true });
     await fs.writeFile(this.skillsIndexPath, lines.join('\n'), 'utf-8');
-    // console.log deliberately omitted to avoid spamming the user console
-  }
-
-  /**
-   * 解析 SKILL.md
-   */
-  private parseSkillMd(content: string, skillPath: string): Skill {
-    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-    let metadata: SkillMetadata;
-    let skillContent: string;
-
-    if (frontmatterMatch) {
-      metadata = YAML.parse(frontmatterMatch[1]) as SkillMetadata;
-      skillContent = frontmatterMatch[2].trim();
-    } else {
-      metadata = { name: path.basename(skillPath), description: '' };
-      skillContent = content.trim();
-    }
-
-    return {
-      id: metadata.name,
-      metadata,
-      content: skillContent,
-      path: skillPath,
-      scripts: new Map(),
-      resources: new Map(),
-    };
   }
 
   /**
    * 安装 skill
    */
-  async install(spec: InstallSpec | string, options: InstallOptions = {}): Promise<InstallResult> {
-    const installSpec = typeof spec === 'string' ? this.parseInstallString(spec) : spec;
-    const result = await installManager.install(installSpec, options);
+  async install(spec: any, options?: any): Promise<InstallResult> {
+    const result = await installManager.install(spec, options);
     if (result.success) {
       await this.rescan();
     }
@@ -270,47 +276,54 @@ export class SkillRegistry {
   /**
    * 卸载 skill
    */
-  async uninstall(skillId: string, options: { purgeData?: boolean } = {}): Promise<boolean> {
+  async uninstall(skillId: string, options?: { purgeData?: boolean }): Promise<boolean> {
     const result = await installManager.uninstall(skillId, options);
     if (result) {
+      this.userSkills.delete(skillId);
       this.packages.delete(skillId);
-      this.skills.delete(skillId);
       await this.rescan();
     }
     return result;
   }
 
   /**
-   * 列出所有 skill
+   * 获取 skill
    */
-  list(): { legacy: Skill[]; packages: SkillPackage[] } {
+  getSkill(id: string): Skill | undefined {
+    return this.builtinSkills.get(id) || this.userSkills.get(id);
+  }
+
+  /**
+   * 获取 package
+   */
+  getPackage(id: string): SkillPackage | undefined {
+    return this.packages.get(id) || installManager.get(id);
+  }
+
+  /**
+   * 列出所有 skills（兼容旧接口）
+   */
+  list(): { builtin: Skill[]; user: Skill[]; packages: SkillPackage[]; legacy: Skill[] } {
     return {
-      legacy: Array.from(this.skills.values()),
+      builtin: Array.from(this.builtinSkills.values()),
+      user: Array.from(this.userSkills.values()),
       packages: Array.from(this.packages.values()),
+      legacy: [], // 兼容旧代码
     };
   }
 
   /**
-   * 获取所有 skill（v1.1 兼容接口）
+   * 获取所有 skills（兼容旧接口）
    */
   getAll(): Skill[] {
-    const legacy = Array.from(this.skills.values());
-    const packagesAsSkills: Skill[] = Array.from(this.packages.values()).map((pkg) => ({
-      id: pkg.manifest.id,
-      metadata: {
-        name: pkg.manifest.name,
-        description: pkg.manifest.description,
-        version: pkg.manifest.version,
-        tools: [],
-      },
-      content: pkg.content || '',
-      path: pkg.path,
-    }));
-    return [...legacy, ...packagesAsSkills];
+    return [
+      ...Array.from(this.builtinSkills.values()),
+      ...Array.from(this.userSkills.values()),
+    ];
   }
 
   /**
-   * 获取 skill 描述
+   * 获取 skill 描述列表（兼容旧接口）
    */
   getSkillDescriptions(): { id: string; name: string; description: string; version?: string }[] {
     return this.getAll().map((s) => ({
@@ -322,14 +335,28 @@ export class SkillRegistry {
   }
 
   /**
-   * 获取索引文件路径
+   * 升级 skill（兼容旧接口）
    */
-  getSkillsIndexPath(): string {
-    return this.skillsIndexPath;
+  async upgrade(skillId: string, toVersion: string): Promise<any> {
+    return installManager.upgrade(skillId, toVersion);
   }
 
   /**
-   * 启动定时扫描
+   * 获取依赖树（兼容旧接口）
+   */
+  async dependencyTree(skillId: string): Promise<any> {
+    return null;
+  }
+
+  /**
+   * 获取 legacy skill（兼容旧接口）
+   */
+  getLegacy(id: string): Skill | undefined {
+    return this.getSkill(id);
+  }
+
+  /**
+   * 启动定时扫描（4小时）
    */
   private startAutoScan(): void {
     if (this.scanInterval) return;
@@ -346,44 +373,6 @@ export class SkillRegistry {
       clearInterval(this.scanInterval);
       this.scanInterval = null;
     }
-  }
-
-  async upgrade(skillId: string, toVersion: string) {
-    const result = await installManager.upgrade(skillId, toVersion);
-    if (result.success) {
-      await this.rescan();
-    }
-    return result;
-  }
-
-  async dependencyTree(skillId: string): Promise<DependencyTree | null> {
-    const pkg = this.getPackage(skillId);
-    if (!pkg || !pkg.manifest.dependencies || pkg.manifest.dependencies.length === 0) {
-      return null;
-    }
-    // 简化返回，不再做 SAT 求解
-    return {
-      root: { id: skillId, version: pkg.manifest.version, resolved: true, children: [] },
-      conflicts: [],
-      install_order: [],
-    };
-  }
-
-  private parseInstallString(str: string) {
-    if (str.startsWith('git:') || str.startsWith('github:')) return { source: 'git' as const, url: str };
-    if (str.startsWith('http://') || str.startsWith('https://')) return { source: 'url' as const, url: str };
-    if (str.startsWith('./') || str.startsWith('../') || str.startsWith('/')) return { source: 'local' as const, path: str };
-    const match = str.match(/^([^@]+)(?:@(.+))?$/);
-    if (match) return { source: 'marketplace' as const, id: match[1], version: match[2] || 'latest' };
-    return { source: 'marketplace' as const, id: str };
-  }
-
-  getPackage(id: string): SkillPackage | undefined {
-    return this.packages.get(id) || installManager.get(id);
-  }
-
-  getLegacy(id: string): Skill | undefined {
-    return this.skills.get(id);
   }
 }
 

@@ -47,6 +47,7 @@ export interface ToolRegistryInterface {
 export interface SkillRegistryInterface {
   getAll(): Skill[];
   getSkillDescriptions(): { name: string; description: string }[];
+  getBuiltinSkillsDescription(): string;
 }
 
 // ==================== PromptAssembler 类 ====================
@@ -192,21 +193,42 @@ export class PromptAssembler {
   }
 
   /**
-   * L5: 直接读取 skills_index.md
+   * L5: Skills 层
+   * 包含两部分：
+   * 1. 内置 skills（直接嵌入，系统核心能力）
+   * 2. 用户安装的 skills（从索引文件读取）
    */
   private async loadLayer5(): Promise<string> {
+    const lines: string[] = ['# Skills 能力层', ''];
+
+    // 1. 内置 skills（从 SkillRegistry 获取）
+    const builtinDescription = this.skillRegistry.getBuiltinSkillsDescription();
+    if (builtinDescription) {
+      lines.push('## 系统内置 Skills（立即可用）');
+      lines.push('');
+      lines.push(builtinDescription);
+      lines.push('');
+    }
+
+    // 2. 用户安装的 skills（从索引文件读取）
     const indexPath = path.join(process.env.HOME || '.', '.starup', 'skills_index.md');
     try {
-      let content = await fs.readFile(indexPath, 'utf-8');
-      // 防止 skills_index.md 过长导致上下文膨胀和截断
-      const maxChars = 8000;
-      if (content.length > maxChars) {
-        content = content.substring(0, maxChars) + '\n\n_...（内容已截断，更多 skill 请使用 /skills 查看）_';
+      let userContent = await fs.readFile(indexPath, 'utf-8');
+      // 防止过长导致上下文膨胀
+      const maxChars = 4000;
+      if (userContent.length > maxChars) {
+        userContent = userContent.substring(0, maxChars) + '\n\n_...（更多 skill 请使用 /skills 查看）_';
       }
-      return this.wrapLayer('SKILLS', content);
+      lines.push('---');
+      lines.push('');
+      lines.push(userContent);
     } catch {
-      return this.wrapLayer('SKILLS', '当前没有加载任何 skill。');
+      lines.push('---');
+      lines.push('');
+      lines.push('_当前没有用户安装的 skills。需要时可以使用 clawhub skill 搜索安装。_');
     }
+
+    return this.wrapLayer('SKILLS', lines.join('\n'));
   }
 
   private generateLayer6(context: RuntimeContext): string {
@@ -249,6 +271,11 @@ export class PromptAssembler {
       '## 指令',
       '你是一个AI助手，请根据以上所有层的信息来理解和回应用户的请求。',
       '请保持与你身份一致的人格和风格，并善用可用的工具和技能。',
+      '',
+      '## 回复格式要求',
+      '1. **思考过程**：在每次回复开头，用 1-2 句话简要说明你的思考过程（例如："我需要查询杭州的天气信息"）。',
+      '2. **工具使用**：如果要调用工具，先说明你要调用什么工具，然后给出工具调用。',
+      '3. **最终回复**：在获得工具结果后，给出完整、清晰的最终回复。',
       '',
       '## 工具使用优先级',
       '1. 如果某个 skill 已经安装并提供了专门工具（如 web_search、weather），必须优先使用该专门工具，**禁止**用 exec 工具自行模拟实现相同功能。',

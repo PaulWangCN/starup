@@ -8,7 +8,6 @@ import { MemoryManager, memoryManager } from './core/memory/MemoryManager';
 import { ToolRegistry, toolRegistry } from './core/tools/ToolRegistry';
 import { skillRegistry } from './core/skills/SkillRegistry';
 import { metaClawhubSkill } from './core/skills/MetaClawhubSkill';
-import { intentRouter } from './core/intent/IntentRouter';
 import { LLMService } from './core/llm/LLMService';
 import { SystemConfig } from './types';
 
@@ -20,6 +19,12 @@ export * from './core/skills';
 export * from './core/llm/LLMService';
 export * from './core/prompt';
 export * from './core/intent';
+
+export interface ProcessMessageCallbacks {
+  onThinking?: (content: string) => void;
+  onToolCall?: (name: string, args: any) => void;
+  onToolResult?: (name: string, result: any) => void;
+}
 
 /**
  * StarUp Core
@@ -56,7 +61,6 @@ export class StarUpCore {
 
     if (this.config.llm.apiKey) {
       this.llmService = new LLMService(this.config.llm);
-      intentRouter.setLLMService(this.llmService);
     }
   }
 
@@ -83,125 +87,134 @@ export class StarUpCore {
 
   /**
    * 处理消息 - 支持 ReAct 多轮工具调用
+   * 
+   * 返回结构包含思考过程和最终回复
    */
-  async processMessage(sessionId: string, message: string, onToolCall?: (name: string, args: any) => void): Promise<string> {
+  async processMessage(
+    sessionId: string,
+    message: string,
+    callbacks?: ProcessMessageCallbacks
+  ): Promise<{ thinking: string[]; finalReply: string }> {
     const session = this.sessionManager.getSession(sessionId);
     if (!session) {
       throw new Error(`Session ${sessionId} not found`);
     }
 
-    // 意图分类
-    const intent = await intentRouter.recognize(message, {
-      session,
-      recentMessages: [],
-      userPreferences: {},
-    });
+    const thinking: string[] = [];
 
-    console.log(`[StarUpCore] Intent: ${intent.intent_id}, target: ${intent.routing.target}`);
-
-    // system_cmd 直接处理
-    if (intent.intent_id === 'system_cmd') {
+    // system_cmd 快速检测（无需 LLM）
+    const lower = message.trim().toLowerCase();
+    if (lower.startsWith('/') || ['重置', '清空记忆', '帮助', '状态'].some((k) => lower.includes(k))) {
       const reply = this.handleSystemCmd(message);
       this.sessionManager.addMessage(sessionId, { role: 'user', content: message, timestamp: Date.now() });
       this.sessionManager.addMessage(sessionId, { role: 'assistant', content: reply, timestamp: Date.now() });
-      return reply;
-    }
-
-    // 把意图信息注入到用户消息中，帮助 LLM 理解
-    let enrichedMessage = message;
-    if (intent.intent_id === 'use_skill' && intent.matched_skill) {
-      enrichedMessage = `[用户意图: 使用 skill "${intent.matched_skill}"] ${message}`;
-    } else if (intent.intent_id === 'code_help') {
-      enrichedMessage = `[用户意图: 代码相关帮助] ${message}`;
-    } else if (intent.intent_id === 'memory_query') {
-      enrichedMessage = `[用户意图: 查询历史记忆] ${message}`;
+      return { thinking: ['[系统] 识别为系统命令，直接处理'], finalReply: reply };
     }
 
     this.sessionManager.addMessage(sessionId, {
       role: 'user',
-      content: enrichedMessage,
+      content: message,
       timestamp: Date.now(),
     });
 
-    if (this.llmService) {
-      const tools = this.toolRegistry.getToolDescriptions();
-      const maxIterations = 20;
-      let iteration = 0;
+    if (!this.llmService) {
+      return { thinking: [], finalReply: 'LLM service not configured' };
+    }
 
-      while (iteration < maxIterations) {
-        iteration++;
-        const response = await this.llmService.chat(session.context.messages, tools);
+    const tools = this.toolRegistry.getToolDescriptions();
+    const maxIterations = 10;
 
-        if (!response.tool_calls || response.tool_calls.length === 0) {
-          let content = response.content || '';
-          // 截断恢复：如果回复明显未完成，请求续写
-          if (this.seemsTruncated(content)) {
-            this.sessionManager.addMessage(sessionId, {
-              role: 'assistant',
-              content,
-              timestamp: Date.now(),
-            });
-            this.sessionManager.addMessage(sessionId, {
-              role: 'system',
-              content: '你的上一条回复似乎被截断了，请继续完成你的回复。',
-              timestamp: Date.now(),
-            });
-            const continuation = await this.llmService.chat(session.context.messages, tools);
-            content = content + (continuation.content || '');
-            this.sessionManager.addMessage(sessionId, {
-              role: 'assistant',
-              content,
-              timestamp: Date.now(),
-            });
-            return content;
-          }
+    for (let iteration = 0; iteration < maxIterations; iteration++) {
+      const response = await this.llmService.chat(session.context.messages, tools);
+
+      // 记录 AI 的思考/回复内容
+      if (response.content) {
+        thinking.push(response.content);
+        if (callbacks?.onThinking) {
+          callbacks.onThinking(response.content);
+        }
+      }
+
+      // 如果没有工具调用，直接返回
+      if (!response.tool_calls || response.tool_calls.length === 0) {
+        let content = response.content || '';
+        
+        // 截断恢复
+        if (this.seemsTruncated(content)) {
           this.sessionManager.addMessage(sessionId, {
             role: 'assistant',
             content,
             timestamp: Date.now(),
           });
-          return content;
+          this.sessionManager.addMessage(sessionId, {
+            role: 'system',
+            content: '你的上一条回复似乎被截断了，请继续完成你的回复。',
+            timestamp: Date.now(),
+          });
+          const continuation = await this.llmService.chat(session.context.messages, tools);
+          content = content + (continuation.content || '');
+          if (continuation.content) {
+            thinking.push(continuation.content);
+          }
         }
 
         this.sessionManager.addMessage(sessionId, {
           role: 'assistant',
-          content: response.content || '',
-          tool_calls: response.tool_calls,
+          content,
           timestamp: Date.now(),
         });
-
-        for (const toolCall of response.tool_calls) {
-          const toolName = toolCall.function.name;
-          const toolArgs = JSON.parse(toolCall.function.arguments);
-          if (onToolCall) {
-            onToolCall(toolName, toolArgs);
-          }
-          const result = await this.toolRegistry.execute(toolName, toolArgs, session);
-          this.sessionManager.addMessage(sessionId, {
-            role: 'tool',
-            content: JSON.stringify(result),
-            tool_call_id: toolCall.id,
-            timestamp: Date.now(),
-          });
-        }
+        return { thinking, finalReply: content };
       }
 
-      this.sessionManager.addMessage(sessionId, {
-        role: 'system',
-        content: '已达到最大迭代次数。请基于已收集的信息给出当前进展和下一步建议。',
-        timestamp: Date.now(),
-      });
-
-      const finalResponse = await this.llmService.chat(session.context.messages, tools);
+      // 有工具调用，添加到会话
       this.sessionManager.addMessage(sessionId, {
         role: 'assistant',
-        content: finalResponse.content,
+        content: response.content || '',
+        tool_calls: response.tool_calls,
         timestamp: Date.now(),
       });
-      return finalResponse.content;
+
+      // 执行所有工具调用
+      for (const toolCall of response.tool_calls) {
+        const toolName = toolCall.function.name;
+        const toolArgs = JSON.parse(toolCall.function.arguments);
+        
+        if (callbacks?.onToolCall) {
+          callbacks.onToolCall(toolName, toolArgs);
+        }
+
+        const result = await this.toolRegistry.execute(toolName, toolArgs, session);
+        
+        if (callbacks?.onToolResult) {
+          callbacks.onToolResult(toolName, result);
+        }
+
+        this.sessionManager.addMessage(sessionId, {
+          role: 'tool',
+          content: JSON.stringify(result),
+          tool_call_id: toolCall.id,
+          timestamp: Date.now(),
+        });
+      }
     }
 
-    return 'LLM service not configured';
+    // 达到最大迭代次数
+    this.sessionManager.addMessage(sessionId, {
+      role: 'system',
+      content: '已达到最大迭代次数。请基于已收集的信息给出当前进展和下一步建议。',
+      timestamp: Date.now(),
+    });
+
+    const finalResponse = await this.llmService.chat(session.context.messages, tools);
+    const finalReply = finalResponse.content || '处理超时，请重试';
+    
+    this.sessionManager.addMessage(sessionId, {
+      role: 'assistant',
+      content: finalReply,
+      timestamp: Date.now(),
+    });
+
+    return { thinking, finalReply };
   }
 
   /**
@@ -234,11 +247,8 @@ export class StarUpCore {
   private seemsTruncated(content: string): boolean {
     if (!content || content.length < 20) return false;
     const trimmed = content.trim();
-    // 以冒号、逗号、连接号结尾通常表示未完待续
     if (/[:：，,\-\—]$/.test(trimmed)) return true;
-    // 如果没有结束标点且长度较长，可能截断
     if (content.length > 100 && !/[。\.!?！？]$/.test(trimmed)) return true;
-    // 如果最后一段以"让我"、"我将"等开头词开头但没有结尾
     if (/让我$|我将$|正在$|如下$|步骤$/.test(trimmed)) return true;
     return false;
   }

@@ -92,9 +92,33 @@ export class Commands {
     const showTree = args.includes('--tree');
     const showPermissions = args.includes('--permissions');
 
-    const { legacy, packages } = skillRegistry.list();
+    const { builtin, user, packages } = skillRegistry.list();
 
     console.log('\nInstalled Skills:\n');
+
+    // 内置 Skills
+    if (builtin.length > 0) {
+      console.log('Built-in Skills:');
+      for (const skill of builtin) {
+        console.log(`  ● ${skill.id} - ${skill.metadata.name}`);
+        if (verbose) {
+          console.log(`     Description: ${skill.metadata.description}`);
+        }
+      }
+      console.log();
+    }
+
+    // 用户 Skills
+    if (user.length > 0) {
+      console.log('User Installed Skills:');
+      for (const skill of user) {
+        console.log(`  ● ${skill.id} - ${skill.metadata.name}`);
+        if (verbose) {
+          console.log(`     Description: ${skill.metadata.description}`);
+        }
+      }
+      console.log();
+    }
 
     // v1.2 Packages
     if (packages.length > 0) {
@@ -120,16 +144,16 @@ export class Commands {
       console.log();
     }
 
-    // v1.1 Legacy Skills
-    if (legacy.length > 0) {
-      console.log('Legacy Skills (v1.1):');
-      for (const skill of legacy) {
+    // 用户 Skills
+    if (user.length > 0) {
+      console.log('User Skills:');
+      for (const skill of user) {
         console.log(`  ○ ${skill.id} - ${skill.metadata.description}`);
       }
       console.log();
     }
 
-    if (packages.length === 0 && legacy.length === 0) {
+    if (packages.length === 0 && builtin.length === 0 && user.length === 0) {
       console.log('  No skills installed.\n');
       console.log('  Run "claw install <skill>" to install a skill.\n');
     }
