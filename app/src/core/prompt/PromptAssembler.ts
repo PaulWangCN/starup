@@ -147,8 +147,8 @@ export class PromptAssembler {
       this.cache.set('agents', { content, timestamp: Date.now() });
       return this.wrapLayer('AGENTS', content);
     } catch (error) {
-      console.warn(`[PromptAssembler] Failed to load AGENTS.md: ${error}`);
-      return this.wrapLayer('AGENTS', this.getDefaultAgents());
+      console.error(`[PromptAssembler] CRITICAL: Failed to load AGENTS.md from ${agentsPath}:`, error);
+      throw new Error(`Failed to load AGENTS.md: ${error}`);
     }
   }
 
@@ -167,8 +167,8 @@ export class PromptAssembler {
       this.cache.set('soul', { content, timestamp: Date.now() });
       return this.wrapLayer('SOUL', content);
     } catch (error) {
-      console.warn(`[PromptAssembler] Failed to load SOUL.md: ${error}`);
-      return this.wrapLayer('SOUL', this.getDefaultSoul());
+      console.error(`[PromptAssembler] CRITICAL: Failed to load SOUL.md from ${soulPath}:`, error);
+      throw new Error(`Failed to load SOUL.md: ${error}`);
     }
   }
 
@@ -184,8 +184,8 @@ export class PromptAssembler {
       this.cache.set('identity', { content, timestamp: Date.now() });
       return this.wrapLayer('IDENTITY', content);
     } catch (error) {
-      console.warn(`[PromptAssembler] Failed to load IDENTITY.md: ${error}`);
-      return this.wrapLayer('IDENTITY', this.getDefaultIdentity());
+      console.error(`[PromptAssembler] CRITICAL: Failed to load IDENTITY.md from ${identityPath}:`, error);
+      throw new Error(`Failed to load IDENTITY.md: ${error}`);
     }
   }
 
@@ -200,8 +200,8 @@ export class PromptAssembler {
       }
       return this.wrapLayer('USER_PROFILE', content);
     } catch (error) {
-      console.warn(`[PromptAssembler] Failed to load USER.md: ${error}`);
-      return '';
+      console.error(`[PromptAssembler] CRITICAL: Failed to load USER.md from ${userPath}:`, error);
+      throw new Error(`Failed to load USER.md: ${error}`);
     }
   }
 
@@ -399,18 +399,6 @@ export class PromptAssembler {
       result = this.truncatePrompt(result, threshold);
     }
     return result;
-  }
-
-  private getDefaultAgents(): string {
-    return '<!-- AGENTS.md 未找到，请确保 ~/.starup/AGENTS.md 存在 -->';
-  }
-
-  private getDefaultSoul(): string {
-    return '<!-- SOUL.md 未找到，请确保 ~/.starup/SOUL.md 存在 -->';
-  }
-
-  private getDefaultIdentity(): string {
-    return '<!-- IDENTITY.md 未找到，请确保 ~/.starup/IDENTITY.md 存在 -->';
   }
 
   clearCache(): void {

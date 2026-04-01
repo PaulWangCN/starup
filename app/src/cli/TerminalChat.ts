@@ -103,10 +103,19 @@ export class TerminalChat {
         requestId: Math.random().toString(36).substring(7),
       };
 
+      console.log('[TerminalChat] Generating system prompt...');
       const assembled = await this.promptAssembler.assemble('default', runtimeContext);
+      console.log(`[TerminalChat] System prompt generated, layers: ${Object.entries(assembled.layers).filter(([k,v]) => v).map(([k,v]) => k).join(', ')}`);
+      
+      // 验证关键层是否加载成功
+      if (!assembled.layers.L0_AGENTS || !assembled.layers.L1_SOUL) {
+        console.error('[TerminalChat] Critical layers missing! Falling back to default.');
+        return this.getDefaultSystemPrompt();
+      }
+      
       return assembled.content;
     } catch (error) {
-      console.warn('[TerminalChat] Failed to generate system prompt:', error);
+      console.error('[TerminalChat] Failed to generate system prompt:', error);
       return this.getDefaultSystemPrompt();
     }
   }
