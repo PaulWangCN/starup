@@ -25,6 +25,8 @@ export interface ProcessMessageCallbacks {
   onThinking?: (content: string) => void;
   onToolCall?: (name: string, args: any) => void;
   onToolResult?: (name: string, result: any) => void;
+  onStreamChunk?: (chunk: string) => void;
+  onIterationStart?: (iteration: number) => void;
 }
 
 /**
@@ -297,7 +299,10 @@ export class StarUpCore {
     const maxIterations = 10;
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
-      const response = await this.llmService.chat(session.context.messages, tools);
+      callbacks?.onIterationStart?.(iteration);
+      const response = await this.llmService.chatStream(session.context.messages, tools, {
+        onChunk: callbacks?.onStreamChunk,
+      });
 
       // 记录 AI 的思考/回复内容
       if (response.content) {
@@ -323,7 +328,9 @@ export class StarUpCore {
             content: '你的上一条回复似乎被截断了，请继续完成你的回复。',
             timestamp: Date.now(),
           });
-          const continuation = await this.llmService.chat(session.context.messages, tools);
+          const continuation = await this.llmService.chatStream(session.context.messages, tools, {
+            onChunk: callbacks?.onStreamChunk,
+          });
           content = content + (continuation.content || '');
           if (continuation.content) {
             thinking.push(continuation.content);
@@ -377,7 +384,9 @@ export class StarUpCore {
       timestamp: Date.now(),
     });
 
-    const finalResponse = await this.llmService.chat(session.context.messages, tools);
+    const finalResponse = await this.llmService.chatStream(session.context.messages, tools, {
+      onChunk: callbacks?.onStreamChunk,
+    });
     const finalReply = finalResponse.content || '处理超时，请重试';
     
     this.sessionManager.addMessage(sessionId, {

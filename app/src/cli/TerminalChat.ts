@@ -212,6 +212,20 @@ export class TerminalChat {
 
     const thinkingLines: string[] = [];
     let currentSpinner: import('ora').Ora | null = null;
+    let streamStarted = false;
+
+    const printThinking = () => {
+      if (thinkingLines.length === 0) return;
+      console.log(chalk.gray('┌─ 思考过程 ──────────────────────'));
+      for (let i = 0; i < thinkingLines.length; i++) {
+        const line = thinkingLines[i];
+        const isLast = i === thinkingLines.length - 1;
+        const prefix = isLast ? '└─> ' : '├─ ';
+        const summary = line.slice(0, 60).replace(/\n/g, ' ');
+        console.log(chalk.gray(`${prefix}${summary}${line.length > 60 ? '...' : ''}`));
+      }
+      console.log();
+    };
 
     try {
       const result = await this.core.processMessage(
@@ -219,54 +233,50 @@ export class TerminalChat {
         message,
         {
           onThinking: (content) => {
-            // 第一次思考时创建 spinner
-            if (thinkingLines.length === 0) {
-              currentSpinner = ora({
-                text: '思考中...',
-                color: 'cyan',
-              }).start();
-            }
             thinkingLines.push(content);
-            // 更新 spinner 显示当前思考摘要
-            const summary = content.slice(0, 40).replace(/\n/g, ' ');
-            if (currentSpinner) {
-              currentSpinner.text = `思考中: ${summary}...`;
+            if (!currentSpinner) {
+              currentSpinner = ora({
+                text: 'AI思考中...',
+                color: 'cyan',
+                spinner: 'line',
+                interval: 500,
+              }).start();
             }
           },
           onToolCall: (name, args) => {
-            if (currentSpinner) {
-              currentSpinner.text = `调用工具: ${name}...`;
-            }
+            // 不再更新 spinner text，避免闪烁
           },
           onToolResult: (name, result) => {
-            if (currentSpinner) {
-              const success = result.success ? '✓' : '✗';
-              currentSpinner.text = `工具 ${name} 返回: ${success}`;
+            // 不再更新 spinner text，避免闪烁
+          },
+          onIterationStart: (iteration) => {
+            streamStarted = false;
+          },
+          onStreamChunk: (chunk) => {
+            if (!streamStarted) {
+              (currentSpinner as any)?.stop();
+              printThinking();
+              streamStarted = true;
+              process.stdout.write(chalk.green('🤖 AI:') + '\n');
             }
+            process.stdout.write(chunk);
           },
         }
       );
 
       (currentSpinner as any)?.stop();
 
-      // 显示思考过程（灰色缩进显示）
-      if (thinkingLines.length > 0) {
-        console.log(chalk.gray('┌─ 思考过程 ──────────────────────'));
-        for (let i = 0; i < thinkingLines.length; i++) {
-          const line = thinkingLines[i];
-          const isLast = i === thinkingLines.length - 1;
-          const prefix = isLast ? '└─> ' : '├─ ';
-          // 只显示思考内容的第一行，避免太长
-          const summary = line.slice(0, 60).replace(/\n/g, ' ');
-          console.log(chalk.gray(`${prefix}${summary}${line.length > 60 ? '...' : ''}`));
-        }
+      if (!streamStarted) {
+        // 流式未触发，回退到原有一次性显示逻辑
+        printThinking();
+        console.log(chalk.green('🤖 AI:'));
+        console.log(result.finalReply);
+        console.log();
+      } else {
+        // 流式已输出完毕，补换行
+        console.log();
         console.log();
       }
-
-      // 显示最终回复（带 AI 前缀）
-      console.log(chalk.green('🤖 AI:'));
-      console.log(result.finalReply);
-      console.log();
 
     } catch (error) {
       (currentSpinner as any)?.stop();
