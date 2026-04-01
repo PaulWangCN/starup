@@ -306,26 +306,7 @@ export class PromptAssembler {
       '',
     ].join('\n');
     const body = validLayers.map((l) => l.content).join('\n\n');
-    const footer = [
-      '',
-      '---',
-      '',
-      '## 指令',
-      '你是一个AI助手，请根据以上所有层的信息来理解和回应用户的请求。',
-      '请保持与你身份一致的人格和风格，并善用可用的工具和技能。',
-      '',
-      '## 回复格式要求',
-      '1. **思考过程**：在每次回复开头，用 1-2 句话简要说明你的思考过程（例如："我需要查询杭州的天气信息"）。',
-      '2. **工具使用**：如果要调用工具，先说明你要调用什么工具，然后给出工具调用。',
-      '3. **最终回复**：在获得工具结果后，给出完整、清晰的最终回复。',
-      '',
-      '## 工具使用优先级',
-      '1. 如果某个 skill 已经安装并提供了专门工具（如 web_search、weather），必须优先使用该专门工具，**禁止**用 exec 工具自行模拟实现相同功能。',
-      '2. 调用工具时，请在回复开头明确说明你要调用哪个工具/来源（例如："我调用 web_search 工具来搜索..."）。',
-      '3. exec 仅用于本地系统命令（如 ls、cat、dir），不应用于替代已安装的 skill。',
-      '',
-    ].join('\n');
-    return header + body + footer;
+    return header + body;
   }
 
   private wrapLayer(layerName: string, content: string): string {
