@@ -6,7 +6,7 @@ const execAsync = promisify(exec);
 
 export const createExecTool = (workingDir: string): ToolDefinition => ({
   name: 'exec',
-  description: '执行本地系统shell命令（自动适配 Windows/Mac/Linux）。这是通用系统命令工具，仅用于执行本地文件/系统操作。\n注意：如果某个skill已经提供了专门工具（如web_search、weather），请优先使用该skill的工具，不要用exec去模拟实现相同功能。',
+  description: '执行本地系统shell命令（自动适配 Windows/Mac/Linux）。这是通用系统命令工具，仅用于执行本地文件/系统操作。\n注意：如果某个skill已经提供了专门工具（如fetch、weather），请优先使用该skill的工具，不要用exec去模拟实现相同功能。',
   parameters: [
     { name: 'command', type: 'string', description: '要执行的命令。Windows: 用dir/cd; Mac/Linux: 用ls/pwd', required: true },
     { name: 'timeout', type: 'number', description: '超时时间（秒）', required: false, default: 60 },

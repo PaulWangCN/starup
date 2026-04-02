@@ -139,7 +139,7 @@ export class IntentRouter {
       lower.includes('画图')
     ) {
       intentId = 'use_skill';
-      skillHint = 'web_search';
+      skillHint = 'fetch';
     } else if (
       lower.includes('写代码') ||
       lower.includes('review') ||

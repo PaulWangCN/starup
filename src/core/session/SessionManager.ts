@@ -141,7 +141,7 @@ export class SessionManager {
         dailyLog: this.getDailyLogPath(),
         longTerm: '', // 子代理不直接访问长期记忆
       },
-      allowedTools: options.tools || ['read', 'web_search'],
+      allowedTools: options.tools?.[0] === 'all' ? toolRegistry.getAllToolNames() : (options.tools || ['read', 'fetch']),
       memoryAccess: options.memory_access || 'none',
       timeout: options.timeout || 300,
       callbackToParent: options.parent_callback ?? true,
