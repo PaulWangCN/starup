@@ -19,43 +19,61 @@ export class SkillRegistry {
   // v1.2 manifest 格式的 packages
   private packages: Map<string, SkillPackage> = new Map();
 
-  private builtinSkillsDir: string;
-  private userSkillsDir: string;
+  private skillsDir: string;
   private skillsIndexPath: string;
   private scanInterval: NodeJS.Timeout | null = null;
+  private lastIndexContent: string = '';
+  private onSkillsUpdated: (() => void) | null = null;
 
   constructor() {
-    const isCompiled = __dirname.includes('dist');
-    if (isCompiled) {
-      this.builtinSkillsDir = path.join(process.cwd(), 'skills');
-    } else {
-      this.builtinSkillsDir = path.join(__dirname, '../../../skills');
-    }
-    this.userSkillsDir = path.join(process.cwd(), '.starup', 'skills');
+    // 所有 skills 统一放到 .starup/skills 目录下
+    // 这样用户可以自由管理（包括删除）任何 skill
+    this.skillsDir = path.join(process.cwd(), '.starup', 'skills');
     this.skillsIndexPath = path.join(process.cwd(), '.starup', 'skills_index.md');
   }
 
   /**
-   * 初始化：加载内置 skills 和用户 skills
+   * 初始化：加载所有 skills
    */
   async initialize(): Promise<void> {
-    // 加载内置 skills（直接嵌入提示词）
-    await this.loadBuiltinSkills();
-    // 加载用户 skills（写入索引文件）
+    // 确保 skills 目录存在
+    await fs.mkdir(this.skillsDir, { recursive: true });
+    // 加载所有 skills（统一从 .starup/skills 加载）
     await this.rescan();
     this.startAutoScan();
+  }
+
+  /**
+   * 设置 skills 更新回调
+   */
+  setOnSkillsUpdated(callback: () => void): void {
+    this.onSkillsUpdated = callback;
+  }
+
+  /**
+   * 获取 skills_index.md 的内容（用于会话初始化时注入）
+   */
+  async getSkillsIndexContent(): Promise<string> {
+    try {
+      const content = await fs.readFile(this.skillsIndexPath, 'utf-8');
+      this.lastIndexContent = content;
+      return content;
+    } catch {
+      return '_当前没有安装的 skills。需要时可以使用 clawhub skill 搜索安装。_';
+    }
   }
 
   /**
    * 获取内置 skills 的完整描述（用于系统提示词）
    */
   getBuiltinSkillsDescription(): string {
-    if (this.builtinSkills.size === 0) {
+    // 现在所有 skills 都在同一个目录，不再需要区分内置和用户
+    if (this.userSkills.size === 0) {
       return '';
     }
 
-    const lines: string[] = ['## 内置 Skills（可直接使用）', ''];
-    for (const [id, skill] of this.builtinSkills) {
+    const lines: string[] = ['## 已安装 Skills', ''];
+    for (const [id, skill] of this.userSkills) {
       lines.push(`### ${skill.metadata.name}`);
       lines.push(`- **ID**: ${id}`);
       lines.push(`- **描述**: ${skill.metadata.description}`);
@@ -69,16 +87,21 @@ export class SkillRegistry {
   }
 
   /**
-   * 重新扫描用户 skills 目录
+   * 重新扫描 skills 目录
    */
   async rescan(): Promise<void> {
     this.userSkills.clear();
     this.packages.clear();
 
-    // 扫描用户目录
-    await this.scanDirectory(this.userSkillsDir, this.userSkills);
+    // 扫描 skills 目录（现在统一在 .starup/skills）
+    await this.scanDirectory(this.skillsDir, this.userSkills);
 
     await this.writeSkillsIndex();
+    
+    // 触发更新回调
+    if (this.onSkillsUpdated) {
+      this.onSkillsUpdated();
+    }
   }
 
   /**
@@ -102,13 +125,7 @@ export class SkillRegistry {
     }
   }
 
-  /**
-   * 加载内置 skills
-   */
-  private async loadBuiltinSkills(): Promise<void> {
-    this.builtinSkills.clear();
-    await this.scanDirectory(this.builtinSkillsDir, this.builtinSkills);
-  }
+
 
   /**
    * 从路径加载单个 skill
@@ -169,9 +186,12 @@ export class SkillRegistry {
   /**
    * 解析 SKILL.md
    * 格式：YAML Frontmatter + Markdown Body
+   * 支持 Windows (\r\n) 和 Unix (\n) 换行符
    */
   private parseSkillMd(content: string, skillPath: string): Skill {
-    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+    // 统一处理换行符，支持 Windows \r\n 和 Unix \n
+    const normalizedContent = content.replace(/\r\n/g, '\n');
+    const frontmatterMatch = normalizedContent.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
 
     let metadata: { name: string; description: string; version?: string };
     let skillContent: string;
@@ -190,7 +210,7 @@ export class SkillRegistry {
         name: path.basename(skillPath),
         description: '',
       };
-      skillContent = content.trim();
+      skillContent = normalizedContent.trim();
     }
 
     return {
@@ -202,56 +222,39 @@ export class SkillRegistry {
   }
 
   /**
-   * 生成用户 skills 索引文件
+   * 生成 skills 索引文件（精简版）
    */
   private async writeSkillsIndex(): Promise<void> {
     const lines: string[] = [
-      '# 用户安装的 Skills 索引',
-      '',
-      '以下 skills 已安装，可以在需要时使用：',
+      '# 已安装 Skills',
       '',
     ];
 
     const all = [...Array.from(this.userSkills.values()), ...Array.from(this.packages.values())];
+    const cwd = process.cwd();
 
     if (all.length === 0) {
-      lines.push('_当前没有用户安装的 skills。_');
+      lines.push('_当前没有安装的 skills。_');
     } else {
       for (const item of all) {
         if ('manifest' in item) {
           const pkg = item as SkillPackage;
-          lines.push(`## ${pkg.manifest.name}`);
-          lines.push(`- **ID**: ${pkg.manifest.id}`);
-          lines.push(`- **版本**: ${pkg.manifest.version}`);
-          lines.push(`- **描述**: ${pkg.manifest.description}`);
-          if (pkg.content) {
-            lines.push('');
-            lines.push(pkg.content);
-          }
+          const relativePath = path.relative(cwd, pkg.path);
+          lines.push(`- **${pkg.manifest.name}**: ${pkg.manifest.description}`);
+          lines.push(`  - 路径: ${relativePath}`);
         } else {
           const skill = item as Skill;
-          lines.push(`## ${skill.metadata.name}`);
-          lines.push(`- **ID**: ${skill.id}`);
-          lines.push(`- **描述**: ${skill.metadata.description}`);
-          if (skill.content) {
-            lines.push('');
-            lines.push(skill.content);
-          }
+          const relativePath = path.relative(cwd, skill.path);
+          lines.push(`- **${skill.metadata.name}**: ${skill.metadata.description}`);
+          lines.push(`  - 路径: ${relativePath}`);
         }
-        lines.push('');
       }
     }
 
-    // 添加使用提示
-    lines.push('---');
-    lines.push('');
-    lines.push('## 提示');
-    lines.push('如果以上 skills 无法满足需求，可以使用内置的 `clawhub` skill 搜索更多 skills。');
-    lines.push('例如："帮我搜索一个能处理 PDF 的 skill"');
-    lines.push('');
-
     await fs.mkdir(path.dirname(this.skillsIndexPath), { recursive: true });
     await fs.writeFile(this.skillsIndexPath, lines.join('\n'), 'utf-8');
+    
+    console.log(`[SkillRegistry] Skills index updated: ${all.length} skills`);
   }
 
 

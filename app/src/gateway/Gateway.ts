@@ -23,6 +23,7 @@ export class Gateway {
   private clients: Map<string, GatewayClient> = new Map();
   private clientSessions: Map<string, ClientSession> = new Map();
   private systemPrompt: string = '';
+  private skillsPrompt: string = '';
   private promptAssembler: PromptAssembler | null = null;
   private running: boolean = false;
 
@@ -58,7 +59,15 @@ export class Gateway {
     this.systemPrompt = await this.buildSystemPrompt();
     this.core.setSystemPrompt(this.systemPrompt);
 
-    // 3. 启动服务
+    // 3. 加载 skills 提示词
+    await this.loadSkillsPrompt();
+
+    // 4. 设置 skills 更新监听
+    this.core.skillRegistry.setOnSkillsUpdated(() => {
+      this.handleSkillsUpdated();
+    });
+
+    // 5. 启动服务
     await this.httpServer.start(this.config.httpPort);
     await this.wsServer.start(this.config.wsPort);
     await this.adapters.initializeAll();
@@ -69,6 +78,40 @@ export class Gateway {
     console.log(`[Gateway] WS    : ws://127.0.0.1:${this.config.wsPort}`);
     console.log(`[Gateway] Token : ${this.config.token ? '已启用' : '未启用（仅限本地安全环境）'}`);
     console.log('[Gateway] Ready');
+  }
+
+  /**
+   * 加载 Skills 提示词（用于注入会话）
+   */
+  private async loadSkillsPrompt(): Promise<void> {
+    try {
+      this.skillsPrompt = await this.core.skillRegistry.getSkillsIndexContent();
+      console.log(`[Gateway] Skills prompt loaded (${this.skillsPrompt.length} chars)`);
+    } catch (error) {
+      console.error('[Gateway] Failed to load skills prompt:', error);
+      this.skillsPrompt = '';
+    }
+  }
+
+  /**
+   * Skills 更新时处理
+   */
+  private async handleSkillsUpdated(): Promise<void> {
+    console.log('[Gateway] Skills updated, reloading...');
+    await this.loadSkillsPrompt();
+    
+    // 更新所有活跃会话的 skills 信息
+    const activeSessions = this.core.sessionManager.getActiveSessions();
+    for (const session of activeSessions) {
+      if (session.type === 'main') {
+        this.core.sessionManager.addMessage(session.id, {
+          role: 'system',
+          content: `[Skills 已更新]\n${this.skillsPrompt}`,
+          timestamp: Date.now(),
+        });
+      }
+    }
+    console.log(`[Gateway] Updated ${activeSessions.length} active sessions with new skills`);
   }
 
   /**
@@ -132,7 +175,10 @@ export class Gateway {
       return existing.sessionId;
     }
 
-    const session = this.core.sessionManager.createStandaloneSession(this.systemPrompt);
+    // 创建会话，注入 system prompt 和 skills
+    const fullPrompt = this.buildFullPrompt();
+    const session = this.core.sessionManager.createStandaloneSession(fullPrompt);
+    
     const cs: ClientSession = {
       clientId,
       sessionId: session.id,
@@ -141,7 +187,28 @@ export class Gateway {
       updatedAt: Date.now(),
     };
     this.clientSessions.set(key, cs);
+    console.log(`[Gateway] Session created for ${clientId} with skills injected`);
     return session.id;
+  }
+
+  /**
+   * 构建完整的系统提示词（包含 skills）
+   */
+  private buildFullPrompt(): string {
+    const parts: string[] = [];
+    
+    if (this.systemPrompt) {
+      parts.push(this.systemPrompt);
+    }
+    
+    if (this.skillsPrompt) {
+      parts.push('');
+      parts.push('<!-- L5_SKILLS: 已安装的 Skills -->');
+      parts.push(this.skillsPrompt);
+      parts.push('<!-- END L5_SKILLS -->');
+    }
+    
+    return parts.join('\n');
   }
 
   /**
