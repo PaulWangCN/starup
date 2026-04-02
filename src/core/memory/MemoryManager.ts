@@ -23,7 +23,7 @@ export class MemoryManager {
   private readonly FRESHNESS_WARNING_DAYS = 1;     // 超过 1 天添加警告
 
   constructor(llmService?: LLMService) {
-    this.memoryDir = path.join(process.env.HOME || '.', '.starup', 'memory');
+    this.memoryDir = path.join(process.cwd(), '.starup', 'memory');
     this.llmService = llmService;
     this.ensureDirectories();
   }

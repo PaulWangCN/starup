@@ -301,7 +301,7 @@ StarUp 采用 AI 驱动的持久记忆架构，让 AI 助手越用越懂你。
 ### 记忆架构
 
 ```
-~/.starup/memory/
+./.starup/memory/
 ├── MEMORY.md              # 记忆索引
 ├── user/                  # 用户画像（始终私有）
 ├── feedback/              # 工作方式反馈
