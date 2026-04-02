@@ -312,6 +312,76 @@ export class StarUpCore {
   }
 
   /**
+   * 评估任务复杂度，用于动态调整 ReAct 轮次
+   */
+  private assessTaskComplexity(message: string, tools: any[]): { level: 'simple' | 'normal' | 'complex' | 'research'; maxIterations: number } {
+    const lower = message.toLowerCase();
+    
+    // 简单任务特征
+    const simplePatterns = [
+      /^(你好|hi|hello|在吗)/,
+      /^(今天|现在|当前)/,
+      /^(什么是|什么是|how to|什么是)/,
+      /(天气|时间|日期|状态)/,
+    ];
+    
+    // 复杂任务特征
+    const complexPatterns = [
+      /(重构|refactor|rewrite)/i,
+      /(所有|全部|each|every|multiple)/,
+      /(分析|analyze|review)/i,
+      /(项目|project|代码库|codebase)/,
+      /(检查|排查|fix.*bugs?)/i,
+      /(生成|创建|create|generate).*(文件|file|代码|code)/,
+      /(批量|批量|batch)/,
+    ];
+    
+    // 研究型任务特征
+    const researchPatterns = [
+      /(研究|research|调研|investigate)/i,
+      /(深度|deep|全面|comprehensive)/,
+      /(报告|report|文档|documentation)/,
+      /(比较|compare|对比|vs)/,
+      /(多个|多种|多种方案|alternatives)/,
+    ];
+    
+    // 计算复杂度得分
+    let complexityScore = 0;
+    
+    // 消息长度因子
+    if (message.length > 200) complexityScore += 1;
+    if (message.length > 500) complexityScore += 1;
+    
+    // 模式匹配
+    if (simplePatterns.some(p => p.test(lower))) complexityScore -= 1;
+    if (complexPatterns.some(p => p.test(lower))) complexityScore += 2;
+    if (researchPatterns.some(p => p.test(lower))) complexityScore += 3;
+    
+    // 工具数量因子（更多可用工具可能意味着更复杂任务）
+    if (tools.length > 5) complexityScore += 1;
+    if (tools.length > 10) complexityScore += 1;
+    
+    // 特定关键词组合
+    if (/\d+\s*(个|个|files?|items?)/.test(message)) {
+      // 明确提到处理多个项目
+      const count = parseInt(message.match(/(\d+)/)?.[1] || '0');
+      if (count > 5) complexityScore += 2;
+      if (count > 10) complexityScore += 2;
+    }
+    
+    // 确定复杂度级别
+    if (complexityScore <= 0) {
+      return { level: 'simple', maxIterations: 5 };
+    } else if (complexityScore <= 3) {
+      return { level: 'normal', maxIterations: 12 };
+    } else if (complexityScore <= 6) {
+      return { level: 'complex', maxIterations: 25 };
+    } else {
+      return { level: 'research', maxIterations: 40 };
+    }
+  }
+
+  /**
    * 处理消息 - 支持 ReAct 多轮工具调用
    * 
    * 返回结构包含思考过程和最终回复
@@ -348,9 +418,29 @@ export class StarUpCore {
     }
 
     const tools = this.toolRegistry.getToolDescriptions();
-    const maxIterations = 10;
+    
+    // 动态评估任务复杂度并设置轮次
+    const complexity = this.assessTaskComplexity(message, tools);
+    const maxIterations = complexity.maxIterations;
+    
+    console.log(`[StarUpCore] Task complexity: ${complexity.level}, maxIterations: ${maxIterations}`);
+    
+    // 如果任务较复杂，提前告知用户
+    if (complexity.level === 'complex' || complexity.level === 'research') {
+      const notice = `[系统] 检测到${complexity.level === 'research' ? '研究型' : '复杂'}任务，已分配 ${maxIterations} 轮处理时间`;
+      thinking.push(notice);
+      callbacks?.onThinking?.(notice);
+    }
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
+      // 接近限制时发出预警
+      const remaining = maxIterations - iteration;
+      if (remaining === 3 && maxIterations > 10) {
+        const warning = `[系统] 任务处理中，剩余 ${remaining} 轮迭代时间...`;
+        thinking.push(warning);
+        callbacks?.onThinking?.(warning);
+      }
+      
       callbacks?.onIterationStart?.(iteration);
       const response = await this.llmService.chatStream(session.context.messages, tools, {
         onChunk: callbacks?.onStreamChunk,
@@ -430,9 +520,13 @@ export class StarUpCore {
     }
 
     // 达到最大迭代次数
+    const timeoutMsg = maxIterations > 10 
+      ? `已达到最大迭代次数（${maxIterations}轮）。任务较复杂，建议：1）拆分任务分批处理，2）输入"继续"让我继续处理剩余部分，或 3）提供更多信息让我聚焦核心问题。`
+      : '已达到最大迭代次数。请基于已收集的信息给出当前进展和下一步建议。';
+    
     this.sessionManager.addMessage(sessionId, {
       role: 'system',
-      content: '已达到最大迭代次数。请基于已收集的信息给出当前进展和下一步建议。',
+      content: timeoutMsg,
       timestamp: Date.now(),
     });
 
