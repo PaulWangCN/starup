@@ -20,7 +20,6 @@ import {
   estimateMessagesTokens,
 } from './core/compact';
 import { SystemConfig } from './types';
-import { MCPClientManager } from './core/mcp/MCPClientManager';
 
 export * from './types';
 export * from './core/session';
@@ -31,8 +30,6 @@ export * from './core/llm/LLMService';
 export * from './core/scheduler/TaskScheduler';
 export * from './core/prompt';
 export * from './core/intent';
-export * from './core/mcp/MCPClientManager';
-export * from './core/mcp/types';
 
 export interface ProcessMessageCallbacks {
   onThinking?: (content: string) => void;
@@ -52,7 +49,6 @@ export class StarUpCore {
   skillRegistry: typeof skillRegistry;
   llmService: LLMService | null = null;
   scheduler: TaskScheduler;
-  mcpManager: MCPClientManager;
   onScheduledTaskComplete?: (content: string) => void;
   private config: SystemConfig;
   private systemPrompt: string | null = null;
@@ -63,7 +59,6 @@ export class StarUpCore {
     this.toolRegistry = toolRegistry;
     this.skillRegistry = skillRegistry;
     this.scheduler = taskScheduler;
-    this.mcpManager = new MCPClientManager(this.toolRegistry);
 
     const llmProvider = (process.env.LLM_PROVIDER as any) || 'deepseek';
     const llmModel = process.env.LLM_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
@@ -155,14 +150,6 @@ export class StarUpCore {
 
     // 加载并启动已持久化的定时任务
     await this.scheduler.initialize();
-
-    // 连接 MCP Server 并注册其工具
-    await this.mcpManager.connectAll();
-
-    // 同步更新所有活跃会话的可用工具列表（包含新注册的 MCP 工具）
-    for (const session of this.sessionManager.getActiveSessions()) {
-      session.allowedTools = this.toolRegistry.getAllToolNames();
-    }
     
     logger.info('StarUpCore', 'Initialization complete');
   }
@@ -541,7 +528,6 @@ export class StarUpCore {
 
   async shutdown(): Promise<void> {
     logger.info('StarUpCore', 'Shutting down...');
-    await this.mcpManager.disconnectAll();
     await this.scheduler.shutdown();
     this.skillRegistry.stopAutoScan();
     logger.info('StarUpCore', 'Shutdown complete');

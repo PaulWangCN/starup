@@ -6,7 +6,6 @@ StarUp 的核心运行时环境，为 AI 助手提供"操作系统"级别的基�
 
 - 🤖 **Session 管理**: 主会话 + 子代理架构，支持任务隔离和结果回流
 - 🔧 **工具系统**: read/write/edit/exec/fetch/web_fetch 等核心工具
-- 🔌 **MCP 集成**: 自动桥接 Model Context Protocol Server，零代码扩展外部工具生态
 - 🧠 **AI 驱动记忆**: 智能记忆召回、新鲜度标注、YAML frontmatter 格式
 - 📦 **Skills 系统**: 模块化扩展，支持热加载
 - 💬 **通道集成**: 飞书、钉钉、Telegram 等平台接入
@@ -28,36 +27,7 @@ cp .env.example .env
 # 编辑 .env 填入你的 API Key
 ```
 
-### 3. 配置 MCP（可选但强烈推荐）
-
-```bash
-cp .starup/mcp.json.example .starup/mcp.json
-# 编辑 .starup/mcp.json 添加你想接入的 MCP Server
-```
-
-示例：接入 GitHub 和文件系统 MCP Server：
-
-```json
-{
-  "servers": [
-    {
-      "name": "github",
-      "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}" }
-    },
-    {
-      "name": "filesystem",
-      "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
-    }
-  ]
-}
-```
-
-### 4. 启动 Gateway（推荐）
+### 3. 启动 Gateway（推荐）
 
 Gateway 是 StarUp 的统一控制平面与通信枢纽，提供 HTTP API、WebSocket 控制平面和外部适配器路由。
 
@@ -74,7 +44,7 @@ Gateway 默认端口：
 - HTTP API: `http://127.0.0.1:18788`
 - WebSocket: `ws://127.0.0.1:18789`
 
-### 5. 启动终端对话
+### 4. 启动终端对话
 
 ```bash
 # 交互式终端对话
@@ -103,8 +73,7 @@ src/
 │   ├── scheduler/          # 任务调度（Cron / Heartbeat）
 │   ├── compact/            # 会话压缩与 Token 管理
 │   ├── prompt/             # 系统提示词组装
-│   ├── intent/             # 意图路由
-│   └── mcp/                # MCP 客户端集成
+│   └── intent/             # 意图路由
 ├── channels/               # 平台通道（Channel）
 │   ├── feishu/             # 飞书
 │   ├── telegram/           # Telegram
@@ -120,8 +89,7 @@ src/
 .starup/                    # 本地运行时目录
 ├── skills/                 # 本地 Skills
 ├── memory/                 # 持久记忆
-├── snapshots/              # 会话快照
-└── mcp.json                # MCP Server 配置
+└── snapshots/              # 会话快照
 ```
 
 ## 终端对话使用
@@ -183,28 +151,6 @@ AI: 我来帮你读取文件...
 - `↑/↓` - 浏览命令历史
 - `Tab` - 自动补全命令
 - `Ctrl+C` - 退出程序
-
-## MCP 集成说明
-
-StarUp 通过 `@modelcontextprotocol/sdk` 自动连接配置好的 MCP Server，并将其工具桥接到内部的 `ToolRegistry`。
-
-### 支持的传输方式
-
-- `stdio`：启动本地进程（最常见，适合 npx 安装的 MCP Server）
-- `sse`：连接远程 SSE 端点
-
-### 环境变量占位符
-
-`.starup/mcp.json` 的 `env` 字段支持 `${ENV_NAME}` 语法，会自动替换为当前进程环境变量。
-
-### 常用 MCP Server 推荐
-
-- `@modelcontextprotocol/server-github` — 查询仓库、读文件、提 Issue/Review
-- `@modelcontextprotocol/server-filesystem` — 安全沙箱文件操作
-- `@modelcontextprotocol/server-puppeteer` — 浏览器自动化、截图
-- `@modelcontextprotocol/server-postgres` — 数据库查询
-
-更多 Server 可参考 [MCP Servers 官方仓库](https://github.com/modelcontextprotocol/servers)。
 
 ## 程序化使用示例
 
@@ -280,16 +226,6 @@ const result = await starup.llmService!.chat(subAgent.context.messages);
 
 // 完成后销毁会话，结果可按配置回流到父会话
 starup.sessionManager.destroySession(subAgent.id);
-```
-
-也可以使用 `tools: ['all']` 让子代理继承当前所有已注册的工具（包含 MCP 工具）：
-
-```typescript
-const subAgent = starup.sessionManager.spawnSubAgent(mainSession.id, {
-  task: "帮我审查这个 GitHub PR",
-  tools: ["all"],
-  timeout: 300,
-});
 ```
 
 ### 使用工具
@@ -424,7 +360,7 @@ for (const r of relevant) {
 
 ### Phase 1 (MVP) ✅
 - [x] 基础 Session 生命周期管理
-- [x] 核心 Tools (read/write/exec/fetch)
+- [x] 核心 Tools (read/write/exec)
 - [x] 飞书 Channel Connector
 - [x] 基础 Memory 文件系统
 - [x] Skill 加载机制
@@ -433,7 +369,6 @@ for (const r of relevant) {
 - [x] Cron & Heartbeat 调度器
 - [x] 钉钉 / Telegram Channel
 - [x] AI 驱动记忆系统（召回、新鲜度、frontmatter）
-- [x] MCP 客户端集成
 - [ ] 微信 Channel 完整实现
 - [ ] 语义记忆检索（向量数据库）
 

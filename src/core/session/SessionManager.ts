@@ -9,7 +9,6 @@ import {
   ConversationMessage,
 } from '../../types';
 import { estimateMessagesTokens } from '../compact/tokens';
-import { toolRegistry } from '../tools/ToolRegistry';
 
 /**
  * 会话管理器
@@ -51,7 +50,7 @@ export class SessionManager {
         dailyLog: this.getDailyLogPath(),
         longTerm: path.join(process.cwd(), '.starup', 'memory', 'MEMORY.md'),
       },
-      allowedTools: toolRegistry.getAllToolNames(),
+      allowedTools: ['read', 'write', 'edit', 'exec', 'fetch', 'web_fetch', 'schedule_task', 'list_scheduled_tasks', 'cancel_scheduled_task', 'list_skills'],
       memoryAccess: 'write',
       timeout: 300,
       callbackToParent: false,
@@ -95,7 +94,7 @@ export class SessionManager {
         dailyLog: this.getDailyLogPath(),
         longTerm: path.join(process.cwd(), '.starup', 'memory', 'MEMORY.md'),
       },
-      allowedTools: toolRegistry.getAllToolNames(),
+      allowedTools: ['read', 'write', 'edit', 'exec', 'fetch', 'web_fetch', 'schedule_task', 'list_scheduled_tasks', 'cancel_scheduled_task', 'list_skills'],
       memoryAccess: 'write',
       timeout: 300,
       callbackToParent: false,
@@ -141,7 +140,7 @@ export class SessionManager {
         dailyLog: this.getDailyLogPath(),
         longTerm: '', // 子代理不直接访问长期记忆
       },
-      allowedTools: options.tools?.[0] === 'all' ? toolRegistry.getAllToolNames() : (options.tools || ['read', 'fetch']),
+      allowedTools: options.tools || ['read', 'fetch'],
       memoryAccess: options.memory_access || 'none',
       timeout: options.timeout || 300,
       callbackToParent: options.parent_callback ?? true,
