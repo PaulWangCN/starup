@@ -266,9 +266,9 @@ export class TerminalChat {
     const onKeyPress = (chunk: Buffer) => {
       const key = chunk.toString();
       
-      // 检测 Ctrl+C (\u0003) 或 ESC (\u001b)
-      if (key === '\u0003' || key === '\u001b') {
-        this.core.abort('用户按下了中断键');
+      // 检测 ESC 键 (\u001b) 中断执行
+      if (key === '\u001b') {
+        this.core.abort('用户按下了 ESC 键');
       }
     };
     
@@ -325,7 +325,7 @@ export class TerminalChat {
     }
 
     // 启动加载动画
-    this.startSpinner('AI 思考中... (按 Ctrl+C 中断)');
+    this.startSpinner('AI 思考中... (按 ESC 中断)');
     
     // 设置中断键盘监听
     this.setupAbortListener();
@@ -346,7 +346,7 @@ export class TerminalChat {
             const success = result.success !== false;
             console.log(success ? chalk.green('  ✓ 完成') : chalk.red('  ✗ 失败'));
             // 重新开始加载动画
-            this.startSpinner('AI 继续思考... (按 Ctrl+C 中断)');
+            this.startSpinner('AI 继续思考... (按 ESC 中断)');
           },
           onIterationStart: (iteration) => {
             streamStarted = false;
