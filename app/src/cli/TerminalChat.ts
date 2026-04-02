@@ -223,7 +223,6 @@ export class TerminalChat {
   private spinnerTimer: NodeJS.Timeout | null = null;
   private spinnerFrame = 0;
   private readonly spinnerChars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-  private abortKeyListener: (() => void) | null = null;
 
   /**
    * 启动简单文字加载动画（不干扰 readline）
@@ -251,44 +250,6 @@ export class TerminalChat {
   }
 
   /**
-   * 设置中断键盘监听
-   * 在执行过程中监听 ESC 键来中断
-   */
-  private setupAbortListener(): void {
-    const stdin = process.stdin;
-    
-    const onKeyPress = (chunk: Buffer) => {
-      const key = chunk.toString();
-      
-      // 检测 ESC 键 (\u001b) 或 ESC 序列开头
-      if (key === '\u001b' || key.startsWith('\u001b')) {
-        this.core.abort('用户按下了 ESC 键');
-      }
-    };
-    
-    stdin.on('data', onKeyPress);
-    
-    // 返回清理函数
-    this.abortKeyListener = () => {
-      stdin.removeListener('data', onKeyPress);
-    };
-  }
-
-  /**
-   * 清理中断监听
-   */
-  private cleanupAbortListener(): void {
-    if (this.abortKeyListener) {
-      this.abortKeyListener();
-      this.abortKeyListener = null;
-    }
-    // 恢复原始模式
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(false);
-    }
-  }
-
-  /**
    * 处理消息并与 AI 对话
    */
   private async processMessage(message: string): Promise<void> {
@@ -299,7 +260,6 @@ export class TerminalChat {
 
     const thinkingLines: string[] = [];
     let streamStarted = false;
-    let aborted = false;
 
     const printThinking = () => {
       if (thinkingLines.length === 0) return;
@@ -319,16 +279,8 @@ export class TerminalChat {
       this.rl.pause();
     }
 
-    // 启用原始模式以监听单个按键 (必须在 rl.pause() 之后)
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(true);
-    }
-
     // 启动加载动画
-    this.startSpinner('AI 思考中... (按 ESC 中断)');
-    
-    // 设置中断键盘监听
-    this.setupAbortListener();
+    this.startSpinner('AI 思考中...');
 
     try {
       const result = await this.core.processMessage(
@@ -346,7 +298,7 @@ export class TerminalChat {
             const success = result.success !== false;
             console.log(success ? chalk.green('  ✓ 完成') : chalk.red('  ✗ 失败'));
             // 重新开始加载动画
-            this.startSpinner('AI 继续思考... (按 ESC 中断)');
+            this.startSpinner('AI 继续思考...');
           },
           onIterationStart: (iteration) => {
             streamStarted = false;
@@ -360,20 +312,12 @@ export class TerminalChat {
             }
             process.stdout.write(chunk);
           },
-          onAbort: (reason) => {
-            aborted = true;
-          },
         }
       );
 
       this.stopSpinner();
 
-      if (aborted || result.aborted) {
-        // 被中断的情况
-        console.log();
-        console.log(chalk.yellow('⚠️ ' + result.finalReply));
-        console.log();
-      } else if (!streamStarted) {
+      if (!streamStarted) {
         // 流式未触发，回退到原有一次性显示逻辑
         printThinking();
         console.log(chalk.green('🤖 AI:'));
@@ -387,18 +331,9 @@ export class TerminalChat {
 
     } catch (error: any) {
       this.stopSpinner();
-      // 检查是否是被中断的错误
-      if (error.message?.includes('中断')) {
-        console.log();
-        console.log(chalk.yellow('⚠️ ' + error.message));
-        console.log();
-      } else {
-        this.renderer.error(`处理消息失败: ${error?.message || error}`);
-        console.log();
-      }
+      this.renderer.error(`处理消息失败: ${error?.message || error}`);
+      console.log();
     } finally {
-      // 清理中断监听
-      this.cleanupAbortListener();
       // 恢复 readline
       if (this.rl) {
         this.rl.resume();

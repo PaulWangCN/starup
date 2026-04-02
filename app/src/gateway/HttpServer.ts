@@ -46,12 +46,6 @@ export class HttpServer {
       res.json(this.gateway.getStatus());
     });
 
-    // 中断当前执行
-    this.app.post('/api/abort', this.authMiddleware, (_req, res) => {
-      this.gateway.abort('用户通过 HTTP API 中断');
-      res.json({ success: true, message: '已发送中断信号' });
-    });
-
     // 创建会话
     this.app.post('/api/sessions', this.authMiddleware, (req, res) => {
       const clientId = (req.body.clientId as string) || `http-${Date.now()}`;
