@@ -8,7 +8,7 @@ StarUp 的核心运行时环境，为 AI 助手提供"操作系统"级别的基�
 - 🔧 **工具系统**: read/write/edit/exec/web_search 等核心工具
 - 🧠 **记忆系统**: 四级记忆架构（短期/日记忆/长期/向量）
 - 📦 **Skills 系统**: 模块化扩展，支持热加载
-- 💬 **通道集成**: 飞书、微信、钉钉等平台接入
+- 💬 **通道集成**: 飞书、钉钉、Telegram 等平台接入
 - 🎯 **LLM 支持**: DeepSeek、OpenAI 等主流模型
 
 ## 快速开始
@@ -67,22 +67,28 @@ src/
 │   ├── session/            # 会话管理
 │   ├── memory/             # 内存系统
 │   ├── tools/              # 工具系统
-│   ├── skills/             # Skills管理
-│   ├── llm/                # LLM服务
-│   └── channels/           # 通道管理
+│   ├── skills/             # Skills 管理
+│   ├── llm/                # LLM 服务
+│   ├── scheduler/          # 任务调度（Cron / Heartbeat）
+│   ├── compact/            # 会话压缩与 Token 管理
+│   ├── prompt/             # 系统提示词组装
+│   └── intent/             # 意图路由
 ├── channels/               # 平台通道（Channel）
 │   ├── feishu/             # 飞书
 │   ├── telegram/           # Telegram
-│   ├── dingtalk/           # 钉钉
-│   └── weixin/             # 微信
-├── scheduler/              # 任务调度
+│   └── dingtalk/           # 钉钉
+├── gateway/                # Gateway 统一入口
+│   ├── HttpServer.ts
+│   ├── WebSocketServer.ts
+│   └── AdapterRegistry.ts
+├── cli/                    # 终端交互界面
 ├── types/                  # 类型定义
 └── index.ts                # 入口文件
 
-skills/                     # 内置 Skills
-├── weather/                # 天气查询
-├── feishu-bitable/         # 飞书表格
-└── memory-manager/         # 记忆管理
+.skills/                    # 本地 Skills 目录（运行时创建）
+├── my-skill/               # 自定义 Skill
+│   └── SKILL.md
+└── ...
 ```
 
 ## 终端对话使用
@@ -130,13 +136,13 @@ AI: 我来帮你读取文件...
 | 命令 | 说明 |
 |------|------|
 | `/help` | 显示帮助信息 |
-| `/exit` | 退出程序 |
+| `/exit`, `/quit` | 退出程序 |
 | `/tools` | 列出可用工具 |
 | `/skills` | 列出已加载 Skills |
 | `/status` | 显示系统状态 |
+| `/tasks` | 列出定时任务 |
 | `/clear` | 清空屏幕 |
-| `/history` | 显示对话历史 |
-| `/spawn <任务>` | 创建子代理执行任务 |
+| `/history [N]` | 显示最近 N 条对话历史（默认 10） |
 
 ### 快捷键
 
@@ -180,41 +186,57 @@ WebSocket 协议示例：
 ### 基础对话
 
 ```typescript
-import { starup } from './index';
+import { StarUpCore } from './src/index';
 
-// 初始化
+const starup = new StarUpCore();
 await starup.initialize();
 
-// 处理消息
+const mainSession = starup.sessionManager.initializeMainSession();
 const response = await starup.processMessage(
-  sessionId,
+  mainSession.id,
   "你好，请帮我查询北京天气"
 );
 console.log(response);
 ```
 
-### 创建子代理
+### 创建子代理会话
+
+> 注：`spawnSubAgent` 创建的是**带有权限隔离的会话上下文**，并非完全独立的并发 Agent。它主要用于需要受限工具集、受限记忆访问或超时控制的场景（例如内部对话压缩）。创建后需由调用方自行使用 `llmService` 消费该会话。
 
 ```typescript
-const subAgent = await starup.spawnSubAgent(mainSessionId, {
+import { StarUpCore } from './src/index';
+
+const starup = new StarUpCore();
+await starup.initialize();
+
+const mainSession = starup.sessionManager.initializeMainSession();
+
+// 创建子代理会话（权限受限的上下文）
+const subAgent = starup.sessionManager.spawnSubAgent(mainSession.id, {
   task: "分析销售数据并生成报告",
   tools: ["read", "write", "exec"],
   timeout: 300,
   parent_callback: true,
 });
+
+// 调用方自行使用 LLM 消费该会话
+const result = await starup.llmService!.chat(subAgent.context.messages);
+
+// 完成后销毁会话，结果可按配置回流到父会话
+starup.sessionManager.destroySession(subAgent.id);
 ```
 
 ### 使用工具
 
 ```typescript
-import { toolRegistry } from './core/tools/ToolRegistry';
+import { toolRegistry } from './src/core/tools/ToolRegistry';
 
 // 读取文件
 const result = await toolRegistry.execute('read', {
   path: 'docs/readme.md',
   offset: 1,
   limit: 50
-}, session);
+});
 ```
 
 ## 配置说明
@@ -223,16 +245,31 @@ const result = await toolRegistry.execute('read', {
 
 | 变量 | 说明 | 必填 |
 |-----|------|-----|
-| `DEEPSEEK_API_KEY` | DeepSeek API Key | 是 |
-| `DEEPSEEK_MODEL` | 模型名称 | 否 |
+| `LLM_PROVIDER` | LLM 提供商 (`deepseek` / `openai`) | 是 |
+| `LLM_API_KEY` | API Key（推荐统一使用此项） | 是 |
+| `LLM_MODEL` | 模型名称（如 `deepseek-chat`） | 是 |
+| `LLM_BASE_URL` | 自定义 API 基础地址 | 否 |
+| `LLM_TEMPERATURE` | 采样温度 | 否 |
+| `LLM_MAX_TOKENS` | 最大生成 Token 数 | 否 |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key（兼容旧版） | 条件 |
+| `DEEPSEEK_MODEL` | DeepSeek 模型名称（兼容旧版） | 否 |
+| `OPENAI_API_KEY` | OpenAI API Key | 条件 |
+| `OPENAI_MODEL` | OpenAI 模型名称 | 否 |
 | `FEISHU_ENABLED` | 启用飞书 | 否 |
 | `FEISHU_APP_ID` | 飞书 App ID | 条件 |
 | `FEISHU_APP_SECRET` | 飞书 App Secret | 条件 |
+| `WEIXIN_ENABLED` | 启用微信 | 否 |
+| `WEIXIN_CORP_ID` | 微信 Corp ID | 条件 |
+| `WEIXIN_SECRET` | 微信 Secret | 条件 |
 | `TELEGRAM_ENABLED` | 启用 Telegram | 否 |
 | `TELEGRAM_BOT_TOKEN` | Telegram Bot Token | 条件 |
 | `DINGTALK_ENABLED` | 启用钉钉 | 否 |
 | `DINGTALK_CLIENT_ID` | 钉钉 Client ID (AppKey) | 条件 |
 | `DINGTALK_CLIENT_SECRET` | 钉钉 Client Secret (AppSecret) | 条件 |
+| `STARUP_GATEWAY_HTTP_PORT` | Gateway HTTP 端口（默认 18788） | 否 |
+| `STARUP_GATEWAY_WS_PORT` | Gateway WebSocket 端口（默认 18789） | 否 |
+| `STARUP_GATEWAY_TOKEN` | Gateway 访问令牌 | 否 |
+| `LOG_LEVEL` | 日志级别 (`debug` / `info` / `warn` / `error`) | 否 |
 
 ### Skill 开发
 
@@ -253,8 +290,8 @@ tools:
 ```
 
 放在以下位置之一：
-- `skills/my-skill/` (项目内置)
-- `./.starup/skills/my-skill/` (本地目录)
+- `skills/my-skill/` (项目内置，若存在)
+- `./.starup/skills/my-skill/` (本地目录，推荐)
 
 ## 开发计划
 
@@ -265,11 +302,11 @@ tools:
 - [x] 基础 Memory 文件系统
 - [x] Skill 加载机制
 
-### Phase 2
+### Phase 2 (进行中)
 - [ ] ACP 协议对接
-- [ ] 子代理并发控制
-- [ ] Cron & Heartbeat 调度器
-- [ ] 微信/钉钉 Channel
+- [x] Cron & Heartbeat 调度器
+- [x] 钉钉 / Telegram Channel
+- [ ] 微信 Channel 完整实现
 - [ ] 语义记忆检索
 
 ### Phase 3

@@ -166,8 +166,8 @@ async function trySessionMemoryCompaction(
     return { success: false };
   }
 
-  // 找到快照覆盖到的消息索引（保守取最后一条作为已摘要边界）
-  const lastSummarizedIndex = Math.max(0, messages.length - 5);
+  // 使用快照创建时的真实消息边界
+  const lastSummarizedIndex = Math.max(0, recentSnapshot.messageCount - 1);
   let startIndex = calculateMessagesToKeepIndex(messages, lastSummarizedIndex);
   startIndex = adjustIndexToPreserveAPIInvariants(messages, startIndex);
 

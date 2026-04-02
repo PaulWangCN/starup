@@ -34,6 +34,7 @@ export interface SessionSnapshot {
   timestamp: number;
   version: string;
   summary: string;           // 对话摘要
+  messageCount: number;      // 快照创建时的消息数量
   keyEntities: Entity[];     // 关键实体
   pendingTasks: Task[];      // 待办事项
   contextState: {            // 上下文状态
@@ -74,6 +75,7 @@ export class SessionSnapshotManager {
       timestamp: Date.now(),
       version: '1.1',
       summary: this.generateSummary(session.context.messages),
+      messageCount: session.context.messages.length,
       keyEntities: this.extractEntities(session.context.messages),
       pendingTasks: this.extractPendingTasks(session),
       contextState: {
@@ -251,33 +253,29 @@ export class SessionSnapshotManager {
 
   /**
    * 生成对话摘要
-   * 使用简单的启发式规则：提取用户和助手的最近几条关键消息
+   * 基于全部历史消息提取关键信息（用户请求、工具操作）
    */
   private generateSummary(messages: ConversationMessage[]): string {
     if (messages.length === 0) {
       return 'Empty conversation';
     }
 
-    // 过滤掉系统消息
-    const userAndAssistantMessages = messages.filter(
-      (m) => m.role === 'user' || m.role === 'assistant'
-    );
+    const lines: string[] = [];
+    for (const msg of messages) {
+      if (msg.role === 'user') {
+        const content = msg.content.substring(0, 80);
+        lines.push(`User: ${content}${msg.content.length > 80 ? '...' : ''}`);
+      } else if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+        const names = msg.tool_calls.map((tc) => tc.function.name).join(', ');
+        lines.push(`Tools used: ${names}`);
+      }
+    }
 
-    if (userAndAssistantMessages.length === 0) {
+    if (lines.length === 0) {
       return 'System initialization';
     }
 
-    // 取最近的几条消息生成摘要
-    const recentMessages = userAndAssistantMessages.slice(-5);
-    const summaries: string[] = [];
-
-    for (const msg of recentMessages) {
-      const content = msg.content.substring(0, 100); // 限制长度
-      const prefix = msg.role === 'user' ? 'User' : 'Assistant';
-      summaries.push(`${prefix}: ${content}${msg.content.length > 100 ? '...' : ''}`);
-    }
-
-    return summaries.join(' | ');
+    return lines.join(' | ');
   }
 
   /**
