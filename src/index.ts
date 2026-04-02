@@ -360,6 +360,10 @@ export class StarUpCore {
         );
       }
 
+      // 在每次迭代开始时触发回调，确保 ReAct 多轮调用时正确重置状态
+      // 注意：截断恢复在循环外，不会触发此回调
+      callbacks?.onIterationStart?.(iteration);
+
       let response;
       try {
         response = await this.llmService.chatStream(session.context.messages, tools, {
@@ -393,7 +397,6 @@ export class StarUpCore {
         }
         throw error;
       }
-      callbacks?.onIterationStart?.(iteration);
 
       // 记录 AI 的思考/回复内容
       if (response.content) {
