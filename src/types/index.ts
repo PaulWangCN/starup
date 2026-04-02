@@ -54,6 +54,8 @@ export interface SpawnOptions {
   memory_access?: 'none' | 'read' | 'write';
   timeout?: number;
   parent_callback?: boolean;
+  /** 是否继承父会话的上下文（消息历史），默认 false */
+  inherit_context?: boolean;
 }
 
 // ==================== 对话上下文 ====================

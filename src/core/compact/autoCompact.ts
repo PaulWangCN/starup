@@ -99,7 +99,7 @@ const SM_COMPACT_CONFIG = {
 /**
  * 计算要保留的最近消息的起始索引
  */
-function calculateMessagesToKeepIndex(
+export function calculateMessagesToKeepIndex(
   messages: ConversationMessage[],
   lastSummarizedIndex: number
 ): number {

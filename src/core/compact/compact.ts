@@ -9,6 +9,7 @@ import { LLMService } from '../llm/LLMService';
 import { estimateMessagesTokens, roughTokenCountEstimation } from './tokens';
 import { groupMessagesByApiRound } from './grouping';
 import { BASE_COMPACT_PROMPT, formatCompactSummary, getCompactUserSummaryMessage } from './prompt';
+import { calculateMessagesToKeepIndex } from './autoCompact';
 
 const MAX_OUTPUT_TOKENS_FOR_SUMMARY = 8_000;
 const MAX_PTL_RETRIES = 1;
@@ -187,7 +188,11 @@ export async function compactConversation(
         timestamp: Date.now(),
       };
 
-      const newMessages = [compactBoundary, summaryMsg];
+      // 保留最近的消息，确保上下文不丢失
+      const keepIndex = calculateMessagesToKeepIndex(messages, 0);
+      const preserved = messages.slice(keepIndex);
+
+      const newMessages = [compactBoundary, summaryMsg, ...preserved];
       const tokensAfter = estimateMessagesTokens(newMessages);
 
       return {

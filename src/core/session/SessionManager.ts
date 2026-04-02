@@ -116,6 +116,21 @@ export class SessionManager {
       throw new Error(`Parent session ${parentId} not found`);
     }
 
+    // 构建子代理的消息列表
+    const messages: ConversationMessage[] = [];
+    
+    // 如果设置了 inherit_context，复制父会话的消息历史
+    if (options.inherit_context) {
+      messages.push(...parent.context.messages);
+    }
+    
+    // 添加子代理的任务提示
+    messages.push({
+      role: 'system',
+      content: `You are a sub-agent. Task: ${options.task}`,
+      timestamp: Date.now(),
+    });
+
     const session: Session = {
       id: uuidv4(),
       type: 'sub',
@@ -124,14 +139,8 @@ export class SessionManager {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       context: {
-        messages: [
-          {
-            role: 'system',
-            content: `You are a sub-agent. Task: ${options.task}`,
-            timestamp: Date.now(),
-          },
-        ],
-        tokenCount: 0,
+        messages,
+        tokenCount: estimateMessagesTokens(messages),
         compressed: false,
         compactCount: 0,
       },
