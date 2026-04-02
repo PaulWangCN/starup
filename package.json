@@ -1,12 +1,12 @@
 {
-  "name": "app",
+  "name": "starup",
   "version": "1.0.0",
   "description": "AI助手运行时环境与集成平台",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "dev": "ts-node src/index.ts",
-    "start": "node dist/index.ts",
+    "start": "node dist/index.js",
     "gateway": "ts-node src/gatewayServer.ts",
     "gateway:prod": "node dist/gatewayServer.js",
     "chat": "ts-node src/cli.ts",

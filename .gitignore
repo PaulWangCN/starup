@@ -14,6 +14,7 @@ yarn.lock
 dist/
 build/
 *.js.map
+*.tsbuildinfo
 
 # Logs
 logs/
@@ -28,11 +29,11 @@ yarn-error.log*
 .env.*.local
 
 # AI generated files (should not be committed)
-app/.starup/*
+.starup/*
 # But keep skills directory (skills_index.md is auto-generated, ignore it)
-!app/.starup/skills/
-!app/.starup/skills/**/
-!app/.starup/skills/**/*
+!.starup/skills/
+!.starup/skills/**/
+!.starup/skills/**/*
 
 # OS
 .DS_Store
@@ -52,3 +53,12 @@ __pycache__/
 *.tmp
 *.temp
 .cache/
+tmp/
+temp/
+
+# Memory files (user data)
+memory/
+*.memory
+
+# But keep example skill's dist
+!skills/**/dist/
