@@ -104,11 +104,11 @@ export class ToolRegistry {
   ): void {
     this.register({
       name: 'schedule_task',
-      description: '创建一个定时任务。当到达指定时间时，系统会自动执行对应的 AI 提示词。支持标准 5 字段 cron 表达式。\n常用示例:\n- 每天早上9点: "0 9 * * *"\n- 每小时: "0 * * * *"\n- 每30分钟: "*/30 * * * *"\n- 每周一早上8点: "0 8 * * 1"\n- 每天凌晨0点: "0 0 * * *"',
+      description: '创建一个定时任务。当到达指定时间时，系统会自动执行对应的 AI 提示词。支持标准 5 字段 cron 表达式。\n常用示例:\n- 每天早上9点: "0 9 * * *"\n- 每小时: "0 * * * *"\n- 每30分钟: "*/30 * * * *"\n- 每周一早上8点: "0 8 * * 1"\n- 每天凌晨0点: "0 0 * * *"\n\n【任务规范】\n1. 如果任务需要执行脚本，脚本必须放在 `.starup/task/{name}/scripts/` 目录下。\n2. `.starup/task/{name}/README.md` 必须存在，用于说明该定时任务的目的、逻辑和维护信息。\n3. 如果脚本涉及环境变量或必要参数，需在 `.starup/task/{name}/props.json` 中声明，任务执行时会自动读取并注入到 prompt 中。\n\n【prompt 写作要求】\nprompt 必须信息完整、逻辑清晰，控制字数在合理范围内（建议 200-800 字）。必须包含以下要素：\n- 任务目标：要达成什么结果\n- 执行步骤：具体怎么做，按什么顺序\n- 输入/依赖：需要读取哪些文件、调用哪些工具、使用哪些参数\n- 预期输出：结果应该是什么格式、保存到哪里、是否需要通知用户\n- 失败处理：遇到常见问题时如何应对',
       parameters: [
-        { name: 'name', type: 'string', description: '任务名称（唯一标识，建议用英文）', required: true },
+        { name: 'name', type: 'string', description: '任务名称（唯一标识，建议用英文，将作为 .starup/task/{name} 的目录名）', required: true },
         { name: 'schedule', type: 'string', description: 'cron 表达式，5 个字段: 分 时 日 月 星期', required: true },
-        { name: 'prompt', type: 'string', description: '任务触发时发给 AI 的提示词/指令', required: true },
+        { name: 'prompt', type: 'string', description: '任务触发时发给 AI 的完整指令。必须包含：任务目标、执行步骤、输入依赖、预期输出、失败处理。如配置了 props.json，其内容会自动附加到本 prompt 中。', required: true },
         { name: 'enabled', type: 'boolean', description: '是否立即启用', required: false, default: true },
       ],
       handler: async (args) => {

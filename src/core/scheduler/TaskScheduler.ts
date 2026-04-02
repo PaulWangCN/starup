@@ -151,8 +151,19 @@ export class TaskScheduler {
     task.lastRun = Date.now();
     task.runCount++;
 
+    let prompt = task.prompt;
     try {
-      await this.executor.execute(task.prompt);
+      const propsPath = path.join(process.cwd(), '.starup', 'task', task.name, 'props.json');
+      const propsContent = await fs.readFile(propsPath, 'utf-8');
+      const props = JSON.parse(propsContent);
+      const propsText = typeof props === 'object' ? JSON.stringify(props, null, 2) : String(props);
+      prompt = `【任务参数】\n以下参数来自 ${propsPath}，请在执行时引用：\n\`\`\`json\n${propsText}\n\`\`\`\n\n【任务指令】\n${task.prompt}`;
+    } catch {
+      // props.json 不存在或读取失败，静默使用原始 prompt
+    }
+
+    try {
+      await this.executor.execute(prompt);
     } catch (error) {
       console.error(`[TaskScheduler] Task execution failed:`, error);
     }
