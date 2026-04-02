@@ -59,6 +59,7 @@ temp/
 # Memory files (user data)
 memory/
 *.memory
+!src/core/memory
 
 # But keep example skill's dist
 !skills/**/dist/
