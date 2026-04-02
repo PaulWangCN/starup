@@ -12,6 +12,7 @@ import { HttpServer } from './HttpServer';
 import { WebSocketServer } from './WebSocketServer';
 import { GatewayConfig, ChatRequest, ChatResponse, StreamChunk, GatewayClient, ClientSession } from './types';
 import { UnifiedMessage, OutgoingMessage, MessageContent } from '../types';
+import { HeartbeatManager } from './HeartbeatManager';
 
 export class Gateway {
   core: StarUpCore;
@@ -19,6 +20,7 @@ export class Gateway {
   httpServer: HttpServer;
   wsServer: WebSocketServer;
   config: GatewayConfig;
+  heartbeatManager: HeartbeatManager;
 
   private clients: Map<string, GatewayClient> = new Map();
   private clientSessions: Map<string, ClientSession> = new Map();
@@ -40,6 +42,7 @@ export class Gateway {
     this.adapters = new AdapterRegistry();
     this.httpServer = new HttpServer(this);
     this.wsServer = new WebSocketServer(this);
+    this.heartbeatManager = new HeartbeatManager(this);
 
     // Adapter 收到消息后路由到 Gateway 处理
     this.adapters.onMessage((msg) => this.handleAdapterMessage(msg));
@@ -72,6 +75,9 @@ export class Gateway {
     await this.wsServer.start(this.config.wsPort);
     await this.adapters.initializeAll();
     await this.adapters.startAll();
+
+    // 6. 启动心跳管理器
+    this.heartbeatManager.start();
 
     this.running = true;
     console.log(`[Gateway] HTTP  : http://127.0.0.1:${this.config.httpPort}`);
@@ -122,6 +128,7 @@ export class Gateway {
     console.log('[Gateway] Stopping...');
     this.running = false;
 
+    this.heartbeatManager.stop();
     await this.wsServer.stop();
     await this.httpServer.stop();
     await this.adapters.stopAll();
@@ -307,7 +314,12 @@ export class Gateway {
    */
   private async handleAdapterMessage(msg: UnifiedMessage): Promise<void> {
     const chatId = msg.metadata?.chat_id;
-    const clientId = chatId ? `${msg.channel}:${chatId}` : `${msg.channel}:${msg.sender.id}`;
+    const userId = msg.sender.id;
+    const clientId = chatId ? `${msg.channel}:${chatId}` : `${msg.channel}:${userId}`;
+    
+    // 记录用户最近使用的渠道
+    this.heartbeatManager.recordUserChannel(userId, msg.channel);
+    
     console.log(`[Gateway] Adapter message from ${msg.channel}, clientId=${clientId}, chatId=${chatId || 'none'}`);
 
     const response = await this.handleChatRequest({
