@@ -26,8 +26,22 @@ export const createReadTool = (workingDir: string): ToolDefinition => ({
         success: true,
         data: { content: selectedLines.join('\n'), totalLines: lines.length, readLines: selectedLines.length },
       };
-    } catch (error) {
-      return { success: false, error: `Failed to read file: ${error}` };
+    } catch (error: any) {
+      const errorMsg = error?.message || String(error);
+      let suggestion = '';
+      
+      if (errorMsg.includes('ENOENT')) {
+        suggestion = '\n💡 提示: 文件不存在。您可以使用 "ls" 或 "dir" 查看当前目录文件';
+      } else if (errorMsg.includes('EACCES') || errorMsg.includes('EPERM')) {
+        suggestion = '\n💡 提示: 权限不足，无法读取该文件';
+      } else if (errorMsg.includes('EISDIR')) {
+        suggestion = '\n💡 提示: 这是一个目录，不是文件。如需查看目录内容，请使用 "ls" 或 "dir"';
+      }
+      
+      return { 
+        success: false, 
+        error: `无法读取文件: ${errorMsg}${suggestion}` 
+      };
     }
   },
 });

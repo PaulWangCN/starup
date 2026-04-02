@@ -21,8 +21,13 @@ export class Renderer {
    */
   showWelcome(): void {
     console.clear();
+    const version = '1.0.0';
     console.log(this.colors.border('╔══════════════════════════════════════════╗'));
-    console.log(this.colors.border('║') + chalk.bold.white('     StarUp - AI Terminal Assistant      ') + this.colors.border('║'));
+    console.log(this.colors.border('║') + chalk.bold.cyan('    🤖 StarUp - AI Terminal Assistant    ') + this.colors.border('║'));
+    console.log(this.colors.border('║') + chalk.gray(`           Version: ${version}            `.padEnd(41)) + this.colors.border('║'));
+    console.log(this.colors.border('╠══════════════════════════════════════════╣'));
+    console.log(this.colors.border('║') + '  输入 /help 查看可用命令                ' + this.colors.border('║'));
+    console.log(this.colors.border('║') + '  输入 /exit 退出程序                    ' + this.colors.border('║'));
     console.log(this.colors.border('╚══════════════════════════════════════════╝'));
     console.log();
   }

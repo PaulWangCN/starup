@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import { Renderer } from './Renderer';
 import { StarUpCore } from '../index';
 import { PromptAssembler, createDefaultConfig, RuntimeContext } from '../core/prompt/PromptAssembler';
+import { logger } from '../utils/Logger';
 
 /**
  * 终端聊天界面
@@ -34,6 +35,9 @@ export class TerminalChat {
    * 启动终端聊天
    */
   async start(): Promise<void> {
+    // 显示启动横幅
+    logger.printBanner('CLI', '1.0.0');
+    
     // 初始化核心（会自动检查并创建配置文件）
     await this.core.initialize();
 
@@ -212,6 +216,14 @@ export class TerminalChat {
 
       case 'tasks':
         this.showTasks();
+        return true;
+
+      case 'clear':
+        this.clearScreen();
+        return true;
+
+      case 'history':
+        this.showHistory(parseInt(args[0]) || 10);
         return true;
 
       default:
@@ -408,10 +420,63 @@ export class TerminalChat {
   }
 
   /**
+   * 清空屏幕
+   */
+  private clearScreen(): void {
+    console.clear();
+    this.renderer.showWelcome();
+    const status = this.core.getStatus();
+    this.renderer.system(`已加载 ${status.skills} 个 Skills, ${status.tools} 个工具`);
+    this.renderer.system(`会话: ${this.mainSessionId?.substring(0, 8)}... 已初始化`);
+    this.renderer.separator();
+  }
+
+  /**
+   * 显示对话历史
+   */
+  private showHistory(limit: number = 10): void {
+    if (!this.mainSessionId) {
+      this.renderer.error('会话未初始化');
+      return;
+    }
+
+    const session = this.core.sessionManager.getSession(this.mainSessionId);
+    if (!session) {
+      this.renderer.error('会话不存在');
+      return;
+    }
+
+    const messages = session.context.messages
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .slice(-limit);
+
+    if (messages.length === 0) {
+      console.log('\n暂无对话历史。');
+      return;
+    }
+
+    console.log(`\n${chalk.bold('对话历史')} (最近 ${messages.length} 条):`);
+    console.log(chalk.gray('─'.repeat(50)));
+
+    for (const msg of messages) {
+      if (msg.role === 'user') {
+        console.log(chalk.cyan(`> ${msg.content}`));
+      } else if (msg.role === 'assistant') {
+        const content = msg.content.substring(0, 80);
+        const suffix = msg.content.length > 80 ? '...' : '';
+        console.log(chalk.green(`🤖 ${content}${suffix}`));
+      }
+    }
+
+    console.log(chalk.gray('─'.repeat(50)));
+    console.log();
+  }
+
+  /**
    * 自动补全
    */
   private completer(line: string): [string[], string] {
-    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools', '/tasks'];
+    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools', '/tasks', '/clear', '/history'];
     const hits = completions.filter((c) => c.startsWith(line));
     return [hits.length ? hits : completions, line];
   }

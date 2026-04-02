@@ -5,6 +5,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { logger } from './utils/Logger';
 import { SessionManager, sessionManager } from './core/session/SessionManager';
 import { MemoryManager, memoryManager } from './core/memory/MemoryManager';
 import { ToolRegistry, toolRegistry } from './core/tools/ToolRegistry';
@@ -81,11 +82,16 @@ export class StarUpCore {
    * 初始化 Core
    */
   async initialize(): Promise<void> {
-    console.log('[StarUpCore] Initializing...');
+    logger.info('StarUpCore', 'Initializing...');
+    
+    // 校验环境变量
+    this.validateConfig();
     
     // 确保配置文件存在
     await this.ensureConfigFiles();
     
+    // 加载 skills
+    logger.info('StarUpCore', 'Loading skills...');
     await this.skillRegistry.initialize();
 
     // 设置定时任务执行器（后台静默执行，避免干扰 CLI spinner）
@@ -132,7 +138,7 @@ export class StarUpCore {
     // 加载并启动已持久化的定时任务
     await this.scheduler.initialize();
     
-    console.log('[StarUpCore] Initialization complete');
+    logger.info('StarUpCore', 'Initialization complete');
   }
 
   /**
@@ -170,8 +176,7 @@ export class StarUpCore {
       path.join(__dirname, '..', '..', 'src', 'core', 'prompt', 'templates'),
     ];
     
-    console.log(`[StarUpCore] Config path: ${agentPath}`);
-    console.log(`[StarUpCore] Possible template paths:`, possibleTemplateDirs);
+    logger.debug('StarUpCore', `Config path: ${agentPath}`);
     
     // 找到实际存在的模板目录
     let templatesDir: string | null = null;
@@ -179,7 +184,7 @@ export class StarUpCore {
       try {
         await fs.access(dir);
         templatesDir = dir;
-        console.log(`[StarUpCore] Using templates from: ${templatesDir}`);
+        logger.debug('StarUpCore', `Using templates from: ${templatesDir}`);
         break;
       } catch {
         // 目录不存在，继续尝试下一个
@@ -187,13 +192,13 @@ export class StarUpCore {
     }
     
     if (!templatesDir) {
-      console.error('[StarUpCore] Could not find templates directory. Searched:', possibleTemplateDirs);
+      logger.error('StarUpCore', 'Could not find templates directory');
       return;
     }
     
     try {
       await fs.mkdir(agentPath, { recursive: true });
-      console.log(`[StarUpCore] Ensuring config directory exists: ${agentPath}`);
+      logger.debug('StarUpCore', `Ensuring config directory exists: ${agentPath}`);
       
       // 需要检查并复制的文件列表
       const filesToCheck = ['AGENTS.md', 'SOUL.md', 'IDENTITY.md', 'USER.md', 'HEARTBEAT.md'];
@@ -202,27 +207,37 @@ export class StarUpCore {
         const targetPath = path.join(agentPath, filename);
         const templatePath = path.join(templatesDir, filename);
         
-        console.log(`[StarUpCore] Checking ${filename}...`);
-        
         try {
-          // 检查文件是否已存在
           await fs.access(targetPath);
-          console.log(`[StarUpCore]   ${filename} already exists`);
+          logger.debug('StarUpCore', `${filename} already exists`);
         } catch {
-          // 文件不存在，尝试从模板复制
-          console.log(`[StarUpCore]   ${filename} not found, copying from template...`);
           try {
             const templateContent = await fs.readFile(templatePath, 'utf-8');
             await fs.writeFile(targetPath, templateContent, 'utf-8');
-            console.log(`[StarUpCore] Created default ${filename}`);
+            logger.info('StarUpCore', `Created default ${filename}`);
           } catch (templateError) {
-            // 模板文件不存在或读取失败
-            console.error(`[StarUpCore] Failed to copy template for ${filename}:`, templateError);
+            logger.error('StarUpCore', `Failed to copy template for ${filename}:`, templateError);
           }
         }
       }
     } catch (error) {
-      console.error('[StarUpCore] Failed to ensure config files:', error);
+      logger.error('StarUpCore', 'Failed to ensure config files:', error);
+    }
+  }
+
+  /**
+   * 校验环境变量配置
+   */
+  private validateConfig(): void {
+    if (!this.config.llm.apiKey) {
+      logger.warn('StarUpCore', '⚠️ LLM_API_KEY / DEEPSEEK_API_KEY 未设置，AI 功能将被禁用');
+      logger.info('StarUpCore', '💡 提示: 复制 .env.example 为 .env 并填入 API Key');
+    }
+    
+    const provider = this.config.llm.provider;
+    const supportedProviders = ['deepseek', 'openai'];
+    if (!supportedProviders.includes(provider)) {
+      logger.warn('StarUpCore', `⚠️ 未知的 LLM 提供商: ${provider}，支持的提供商: ${supportedProviders.join(', ')}`);
     }
   }
 
@@ -395,10 +410,10 @@ export class StarUpCore {
   }
 
   async shutdown(): Promise<void> {
-    console.log('[StarUpCore] Shutting down...');
+    logger.info('StarUpCore', 'Shutting down...');
     await this.scheduler.shutdown();
     this.skillRegistry.stopAutoScan();
-    console.log('[StarUpCore] Shutdown complete');
+    logger.info('StarUpCore', 'Shutdown complete');
   }
 
   /**

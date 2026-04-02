@@ -13,6 +13,7 @@ import { WebSocketServer } from './WebSocketServer';
 import { GatewayConfig, ChatRequest, ChatResponse, StreamChunk, GatewayClient, ClientSession } from './types';
 import { UnifiedMessage, OutgoingMessage, MessageContent } from '../types';
 import { HeartbeatManager } from './HeartbeatManager';
+import { logger } from '../utils/Logger';
 
 export class Gateway {
   core: StarUpCore;
@@ -53,7 +54,10 @@ export class Gateway {
    */
   async start(): Promise<void> {
     if (this.running) return;
-    console.log('[Gateway] Starting...');
+    
+    // 显示启动横幅
+    logger.printBanner('Gateway', '1.0.0');
+    logger.info('Gateway', 'Starting...');
 
     // 1. 初始化 Core
     await this.core.initialize();
@@ -80,10 +84,10 @@ export class Gateway {
     this.heartbeatManager.start();
 
     this.running = true;
-    console.log(`[Gateway] HTTP  : http://127.0.0.1:${this.config.httpPort}`);
-    console.log(`[Gateway] WS    : ws://127.0.0.1:${this.config.wsPort}`);
-    console.log(`[Gateway] Token : ${this.config.token ? '已启用' : '未启用（仅限本地安全环境）'}`);
-    console.log('[Gateway] Ready');
+    logger.info('Gateway', `HTTP  : http://127.0.0.1:${this.config.httpPort}`);
+    logger.info('Gateway', `WS    : ws://127.0.0.1:${this.config.wsPort}`);
+    logger.info('Gateway', `Token : ${this.config.token ? '已启用' : '未启用（仅限本地安全环境）'}`);
+    logger.info('Gateway', 'Ready');
   }
 
   /**
@@ -92,9 +96,9 @@ export class Gateway {
   private async loadSkillsPrompt(): Promise<void> {
     try {
       this.skillsPrompt = await this.core.skillRegistry.getSkillsIndexContent();
-      console.log(`[Gateway] Skills prompt loaded (${this.skillsPrompt.length} chars)`);
+      logger.debug('Gateway', `Skills prompt loaded (${this.skillsPrompt.length} chars)`);
     } catch (error) {
-      console.error('[Gateway] Failed to load skills prompt:', error);
+      logger.error('Gateway', 'Failed to load skills prompt:', error);
       this.skillsPrompt = '';
     }
   }
@@ -117,7 +121,7 @@ export class Gateway {
         });
       }
     }
-    console.log(`[Gateway] Updated ${activeSessions.length} active sessions with new skills`);
+    logger.info('Gateway', `Updated ${activeSessions.length} active sessions with new skills`);
   }
 
   /**
@@ -125,7 +129,7 @@ export class Gateway {
    */
   async stop(): Promise<void> {
     if (!this.running) return;
-    console.log('[Gateway] Stopping...');
+    logger.info('Gateway', 'Stopping...');
     this.running = false;
 
     this.heartbeatManager.stop();
@@ -134,7 +138,7 @@ export class Gateway {
     await this.adapters.stopAll();
     await this.core.shutdown();
 
-    console.log('[Gateway] Stopped');
+    logger.info('Gateway', 'Stopped');
   }
 
   /**
@@ -150,7 +154,7 @@ export class Gateway {
    */
   registerClient(client: GatewayClient): void {
     this.clients.set(client.id, client);
-    console.log(`[Gateway] Client registered: ${client.id} (${client.role})`);
+    logger.info('Gateway', `Client registered: ${client.id} (${client.role})`);
   }
 
   /**
@@ -168,7 +172,7 @@ export class Gateway {
     for (const key of keysToDelete) {
       this.clientSessions.delete(key);
     }
-    console.log(`[Gateway] Client removed: ${clientId}`);
+    logger.info('Gateway', `Client removed: ${clientId}`);
   }
 
   /**
@@ -194,7 +198,7 @@ export class Gateway {
       updatedAt: Date.now(),
     };
     this.clientSessions.set(key, cs);
-    console.log(`[Gateway] Session created for ${clientId} with skills injected`);
+    logger.debug('Gateway', `Session created for ${clientId} with skills injected`);
     return session.id;
   }
 
@@ -261,7 +265,7 @@ export class Gateway {
   ): Promise<ChatResponse> {
     const clientId = request.clientId || uuidv4();
     const sessionId = request.sessionId || this.getOrCreateSession(clientId, request.channel);
-    console.log(`[Gateway] handleChatRequest clientId=${clientId}, sessionId=${sessionId}, msg=${request.message.slice(0, 50)}${request.message.length > 50 ? '...' : ''}`);
+    logger.debug('Gateway', `handleChatRequest clientId=${clientId}, msg=${request.message.slice(0, 50)}${request.message.length > 50 ? '...' : ''}`);
 
     const callbacks: ProcessMessageCallbacks = {};
     const thinking: string[] = [];
@@ -284,7 +288,7 @@ export class Gateway {
 
     try {
       const result = await this.core.processMessage(sessionId, request.message, callbacks);
-      console.log(`[Gateway] processMessage success, reply=${result.finalReply.slice(0, 80)}${result.finalReply.length > 80 ? '...' : ''}`);
+      logger.debug('Gateway', `processMessage success, reply=${result.finalReply.slice(0, 80)}${result.finalReply.length > 80 ? '...' : ''}`);
       if (onChunk) {
         onChunk({ type: 'done', data: result.finalReply });
       }
@@ -296,7 +300,7 @@ export class Gateway {
       };
     } catch (error: any) {
       const errMsg = error?.message || String(error);
-      console.error(`[Gateway] processMessage error:`, errMsg);
+      logger.error('Gateway', 'processMessage error:', errMsg);
       if (onChunk) {
         onChunk({ type: 'done', data: errMsg });
       }
@@ -320,7 +324,7 @@ export class Gateway {
     // 记录用户最近使用的渠道
     this.heartbeatManager.recordUserChannel(userId, msg.channel);
     
-    console.log(`[Gateway] Adapter message from ${msg.channel}, clientId=${clientId}, chatId=${chatId || 'none'}`);
+    logger.debug('Gateway', `Adapter message from ${msg.channel}, clientId=${clientId}, chatId=${chatId || 'none'}`);
 
     const response = await this.handleChatRequest({
       clientId,
@@ -329,7 +333,7 @@ export class Gateway {
       metadata: msg.metadata,
     });
 
-    console.log(`[Gateway] AI response: ${response.message.slice(0, 100)}${response.message.length > 100 ? '...' : ''}`);
+    logger.debug('Gateway', `AI response: ${response.message.slice(0, 100)}${response.message.length > 100 ? '...' : ''}`);
 
     // 通过 Adapter 发送回去
     const outgoing: OutgoingMessage = {
@@ -343,9 +347,9 @@ export class Gateway {
 
     try {
       await this.adapters.sendTo(msg.channel, outgoing);
-      console.log(`[Gateway] Response sent via ${msg.channel}`);
+      logger.info('Gateway', `Response sent via ${msg.channel}`);
     } catch (err) {
-      console.error(`[Gateway] Failed to send response via adapter ${msg.channel}:`, err);
+      logger.error('Gateway', `Failed to send response via adapter ${msg.channel}:`, err);
     }
   }
 
@@ -375,12 +379,12 @@ export class Gateway {
 
       const assembled = await this.promptAssembler.assemble('default', runtimeContext);
       if (!assembled.layers.L0_AGENTS || !assembled.layers.L1_SOUL) {
-        console.error('[Gateway] Critical prompt layers missing, using fallback.');
+        logger.error('Gateway', 'Critical prompt layers missing, using fallback.');
         return this.getFallbackSystemPrompt();
       }
       return assembled.content;
     } catch (error) {
-      console.error('[Gateway] Failed to build system prompt:', error);
+      logger.error('Gateway', 'Failed to build system prompt:', error);
       return this.getFallbackSystemPrompt();
     }
   }
@@ -405,7 +409,7 @@ export class Gateway {
         },
       });
       this.adapters.register(feishuConnector);
-      console.log('[Gateway] Feishu adapter registered');
+      logger.info('Gateway', 'Feishu adapter registered');
     }
 
     // Telegram
@@ -419,7 +423,7 @@ export class Gateway {
         },
       });
       this.adapters.register(telegramConnector);
-      console.log('[Gateway] Telegram adapter registered');
+      logger.info('Gateway', 'Telegram adapter registered');
     }
 
     // 钉钉
@@ -434,7 +438,7 @@ export class Gateway {
         },
       });
       this.adapters.register(dingtalkConnector);
-      console.log('[Gateway] DingTalk adapter registered');
+      logger.info('Gateway', 'DingTalk adapter registered');
     }
   }
 
