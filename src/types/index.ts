@@ -79,6 +79,8 @@ export interface ConversationContext {
   messages: ConversationMessage[];
   tokenCount: number;
   compressed: boolean;
+  lastCompactAt?: number;
+  compactCount?: number;
 }
 
 // ==================== Memory 类型 ====================

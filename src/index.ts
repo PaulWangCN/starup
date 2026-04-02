@@ -12,6 +12,13 @@ import { ToolRegistry, toolRegistry } from './core/tools/ToolRegistry';
 import { skillRegistry } from './core/skills/SkillRegistry';
 import { LLMService } from './core/llm/LLMService';
 import { TaskScheduler, taskScheduler } from './core/scheduler/TaskScheduler';
+import { sessionSnapshotManager } from './core/session/SessionSnapshot';
+import {
+  applyMicroCompact,
+  autoCompactIfNeeded,
+  reactiveCompact,
+  estimateMessagesTokens,
+} from './core/compact';
 import { SystemConfig } from './types';
 
 export * from './types';
@@ -290,12 +297,97 @@ export class StarUpCore {
 
     const tools = this.toolRegistry.getToolDescriptions();
     const maxIterations = 20;
+    let reactiveCompactAttempted = false;
+
+    // 预创建快照，为 Session Memory 压缩提供素材
+    try {
+      await sessionSnapshotManager.createSnapshot(session);
+    } catch {
+      // 忽略快照错误
+    }
+
+    // 初始自动压缩检查
+    const initialCompact = await autoCompactIfNeeded(
+      session,
+      session.context.messages,
+      this.llmService,
+      this.sessionManager,
+      sessionSnapshotManager,
+      this.config.llm.model
+    );
+    if (initialCompact.wasCompacted && initialCompact.newMessages) {
+      session.context.messages = initialCompact.newMessages;
+      session.context.tokenCount = initialCompact.tokensAfter ?? estimateMessagesTokens(session.context.messages);
+      session.context.compressed = true;
+      session.context.lastCompactAt = Date.now();
+      session.context.compactCount = (session.context.compactCount ?? 0) + 1;
+      console.log(
+        `[StarUpCore] Auto-compacted via ${initialCompact.method}, tokens: ${initialCompact.tokensBefore} -> ${initialCompact.tokensAfter}`
+      );
+    }
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
+      // 第1层：微压缩
+      const mc = applyMicroCompact(session.context.messages);
+      if (mc.modified) {
+        session.context.tokenCount = estimateMessagesTokens(session.context.messages);
+        console.log(`[StarUpCore] Micro-compact cleared ${mc.clearedCount} old tool results`);
+      }
+
+      // 第2层：自动压缩（迭代中再次检查）
+      const iterCompact = await autoCompactIfNeeded(
+        session,
+        session.context.messages,
+        this.llmService,
+        this.sessionManager,
+        sessionSnapshotManager,
+        this.config.llm.model
+      );
+      if (iterCompact.wasCompacted && iterCompact.newMessages) {
+        session.context.messages = iterCompact.newMessages;
+        session.context.tokenCount = iterCompact.tokensAfter ?? estimateMessagesTokens(session.context.messages);
+        session.context.compressed = true;
+        session.context.lastCompactAt = Date.now();
+        session.context.compactCount = (session.context.compactCount ?? 0) + 1;
+        console.log(
+          `[StarUpCore] Auto-compacted via ${iterCompact.method}, tokens: ${iterCompact.tokensBefore} -> ${iterCompact.tokensAfter}`
+        );
+      }
+
+      let response;
+      try {
+        response = await this.llmService.chatStream(session.context.messages, tools, {
+          onChunk: callbacks?.onStreamChunk,
+        });
+      } catch (error: any) {
+        const errMsg = String(error.message || error);
+        const isPTL =
+          errMsg.includes('prompt is too long') ||
+          errMsg.includes('maximum context length') ||
+          errMsg.includes('context length');
+
+        if (isPTL && !reactiveCompactAttempted) {
+          reactiveCompactAttempted = true;
+          const rc = await reactiveCompact(
+            session,
+            session.context.messages,
+            this.llmService,
+            this.sessionManager
+          );
+          if (rc.wasCompacted && rc.newMessages) {
+            session.context.messages = rc.newMessages;
+            session.context.tokenCount = estimateMessagesTokens(session.context.messages);
+            session.context.compressed = true;
+            session.context.lastCompactAt = Date.now();
+            session.context.compactCount = (session.context.compactCount ?? 0) + 1;
+            console.log('[StarUpCore] Reactive compact succeeded, retrying iteration');
+            iteration--;
+            continue;
+          }
+        }
+        throw error;
+      }
       callbacks?.onIterationStart?.(iteration);
-      const response = await this.llmService.chatStream(session.context.messages, tools, {
-        onChunk: callbacks?.onStreamChunk,
-      });
 
       // 记录 AI 的思考/回复内容
       if (response.content) {

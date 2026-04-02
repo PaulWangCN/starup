@@ -8,6 +8,7 @@ import {
   ConversationContext,
   ConversationMessage,
 } from '../../types';
+import { estimateMessagesTokens } from '../compact/tokens';
 
 /**
  * 会话管理器
@@ -40,8 +41,9 @@ export class SessionManager {
       updatedAt: Date.now(),
       context: {
         messages,
-        tokenCount: 0,
+        tokenCount: estimateMessagesTokens(messages),
         compressed: false,
+        compactCount: 0,
       },
       memory: {
         shortTerm: [],
@@ -131,6 +133,7 @@ export class SessionManager {
         ],
         tokenCount: 0,
         compressed: false,
+        compactCount: 0,
       },
       memory: {
         shortTerm: [],
@@ -186,10 +189,8 @@ export class SessionManager {
     }
 
     session.context.messages.push(message);
+    session.context.tokenCount = estimateMessagesTokens(session.context.messages);
     session.updatedAt = Date.now();
-
-    // 检查是否需要压缩
-    this.checkCompression(session);
   }
 
   /**
@@ -296,14 +297,6 @@ export class SessionManager {
     }, session.timeout * 1000);
   }
 
-  private checkCompression(session: Session): void {
-    const threshold = 8000; // 8k tokens
-    if (session.context.tokenCount > threshold && !session.context.compressed) {
-      // 触发压缩（实际实现需要调用压缩服务）
-      console.log(`[SessionManager] Session ${session.id} needs compression`);
-      session.context.compressed = true;
-    }
-  }
 }
 
 // 单例导出

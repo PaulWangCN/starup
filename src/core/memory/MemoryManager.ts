@@ -103,50 +103,6 @@ ${content}
   }
 
   /**
-   * 压缩对话上下文
-   * 当token数超过阈值时，提取关键信息生成摘要
-   */
-  async compressContext(messages: any[], session: Session): Promise<{
-    summary: string;
-    compressed: boolean;
-  }> {
-    // 提取关键决策、用户意图、待办事项
-    const keyDecisions: string[] = [];
-    const todos: string[] = [];
-    let userIntent = '';
-
-    for (const msg of messages) {
-      if (msg.role === 'user') {
-        userIntent = msg.content.substring(0, 200);
-      }
-      // 可以在这里添加更复杂的摘要逻辑
-    }
-
-    const summary = `
-# 对话摘要 - ${new Date().toLocaleDateString()}
-
-## 用户意图
-${userIntent}
-
-## 关键决策
-${keyDecisions.length > 0 ? keyDecisions.map(d => `- ${d}`).join('\n') : '无'}
-
-## 待办事项
-${todos.length > 0 ? todos.map(t => `- [ ] ${t}`).join('\n') : '无'}
-`;
-
-    // 写入日记忆
-    await this.writeDailyLog({
-      timestamp: Date.now(),
-      topic: '对话摘要',
-      summary,
-      importance: 7,
-    });
-
-    return { summary, compressed: true };
-  }
-
-  /**
    * 语义搜索记忆
    * （需要接入向量数据库）
    */
