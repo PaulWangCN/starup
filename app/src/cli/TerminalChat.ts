@@ -252,22 +252,16 @@ export class TerminalChat {
 
   /**
    * 设置中断键盘监听
-   * 在执行过程中监听 Ctrl+C 来中断
+   * 在执行过程中监听 ESC 键来中断
    */
   private setupAbortListener(): void {
-    // 保存原始键处理
     const stdin = process.stdin;
-    
-    // 启用原始模式以监听单个按键
-    if (stdin.isTTY) {
-      stdin.setRawMode(true);
-    }
     
     const onKeyPress = (chunk: Buffer) => {
       const key = chunk.toString();
       
-      // 检测 ESC 键 (\u001b) 中断执行
-      if (key === '\u001b') {
+      // 检测 ESC 键 (\u001b) 或 ESC 序列开头
+      if (key === '\u001b' || key.startsWith('\u001b')) {
         this.core.abort('用户按下了 ESC 键');
       }
     };
@@ -276,10 +270,7 @@ export class TerminalChat {
     
     // 返回清理函数
     this.abortKeyListener = () => {
-      stdin.off('data', onKeyPress);
-      if (stdin.isTTY) {
-        stdin.setRawMode(false);
-      }
+      stdin.removeListener('data', onKeyPress);
     };
   }
 
@@ -290,6 +281,10 @@ export class TerminalChat {
     if (this.abortKeyListener) {
       this.abortKeyListener();
       this.abortKeyListener = null;
+    }
+    // 恢复原始模式
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(false);
     }
   }
 
@@ -322,6 +317,11 @@ export class TerminalChat {
     // 暂停 readline 以避免与流式输出冲突
     if (this.rl) {
       this.rl.pause();
+    }
+
+    // 启用原始模式以监听单个按键 (必须在 rl.pause() 之后)
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(true);
     }
 
     // 启动加载动画
