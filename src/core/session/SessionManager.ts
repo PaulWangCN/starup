@@ -147,7 +147,6 @@ export class SessionManager {
     };
 
     this.sessions.set(session.id, session);
-    console.log(`[SessionManager] Sub-agent spawned: ${session.id} (parent: ${parentId})`);
     
     // 启动超时处理
     this.setupTimeout(session);

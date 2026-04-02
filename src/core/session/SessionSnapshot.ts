@@ -92,7 +92,6 @@ export class SessionSnapshotManager {
     // 限制每个会话的快照数量，防止无限堆积
     await this.retainLatestSnapshots(session.id, 10);
     
-    console.log(`[SessionSnapshotManager] Snapshot created for session ${session.id}`);
     return snapshot;
   }
 
