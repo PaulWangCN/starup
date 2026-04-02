@@ -29,11 +29,10 @@ yarn-error.log*
 
 # AI generated files (should not be committed)
 app/.starup/*
-# But keep skills directory and index
+# But keep skills directory (skills_index.md is auto-generated, ignore it)
 !app/.starup/skills/
 !app/.starup/skills/**/
 !app/.starup/skills/**/*
-!app/.starup/skills_index.md
 
 # OS
 .DS_Store

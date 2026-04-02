@@ -231,7 +231,6 @@ export class SkillRegistry {
     ];
 
     const all = [...Array.from(this.userSkills.values()), ...Array.from(this.packages.values())];
-    const cwd = process.cwd();
 
     if (all.length === 0) {
       lines.push('_当前没有安装的 skills。_');
@@ -239,14 +238,12 @@ export class SkillRegistry {
       for (const item of all) {
         if ('manifest' in item) {
           const pkg = item as SkillPackage;
-          const relativePath = path.relative(cwd, pkg.path);
           lines.push(`- **${pkg.manifest.name}**: ${pkg.manifest.description}`);
-          lines.push(`  - 路径: ${relativePath}`);
+          lines.push(`  - 路径: ${pkg.path}`);
         } else {
           const skill = item as Skill;
-          const relativePath = path.relative(cwd, skill.path);
           lines.push(`- **${skill.metadata.name}**: ${skill.metadata.description}`);
-          lines.push(`  - 路径: ${relativePath}`);
+          lines.push(`  - 路径: ${skill.path}`);
         }
       }
     }
