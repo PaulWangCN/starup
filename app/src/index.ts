@@ -304,9 +304,9 @@ export class StarUpCore {
    * 获取系统状态
    */
   getStatus(): { skills: number; tools: number } {
-    const { legacy, packages } = this.skillRegistry.list();
+    const { user, packages } = this.skillRegistry.list();
     return {
-      skills: legacy.length + packages.length,
+      skills: user.length + packages.length,
       tools: this.toolRegistry.getAll().length,
     };
   }
