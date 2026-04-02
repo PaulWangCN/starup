@@ -37,8 +37,8 @@ function getEffectiveContextWindowSize(model: string): number {
     MAX_OUTPUT_TOKENS_FOR_SUMMARY,
   );
   let contextWindow = getContextWindowForModel(model);
-  if (process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW) {
-    const parsed = parseInt(process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, 10);
+  if (process.env.STAR_UP_AUTO_COMPACT_WINDOW) {
+    const parsed = parseInt(process.env.STAR_UP_AUTO_COMPACT_WINDOW, 10);
     if (!isNaN(parsed)) {
       contextWindow = Math.min(contextWindow, parsed);
     }
