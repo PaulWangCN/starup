@@ -284,7 +284,9 @@ export class StarUpCore {
 
     // system_cmd 快速检测（无需 LLM）
     const lower = message.trim().toLowerCase();
-    if (lower.startsWith('/') || ['重置', '清空记忆', '帮助', '状态'].some((k) => lower.includes(k))) {
+    const systemCommands = ['/reset', '/help', '/status', '/skills', '/tools', '/tasks', '/clear', '/history'];
+    const isExactSystemCmd = systemCommands.some((cmd) => lower === cmd || lower.startsWith(cmd + ' '));
+    if (isExactSystemCmd) {
       const reply = this.handleSystemCmd(message);
       this.sessionManager.addMessage(sessionId, { role: 'user', content: message, timestamp: Date.now() });
       this.sessionManager.addMessage(sessionId, { role: 'assistant', content: reply, timestamp: Date.now() });
