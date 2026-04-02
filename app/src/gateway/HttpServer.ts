@@ -233,10 +233,18 @@ export class HttpServer {
   };
 
   async start(port: number): Promise<void> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       this.server = this.app.listen(port, () => {
         console.log(`[HttpServer] Listening on port ${port}`);
         resolve();
+      });
+      
+      this.server.on('error', (err: any) => {
+        if (err.code === 'EADDRINUSE') {
+          reject(new Error(`端口 ${port} 已被占用，请检查是否有其他 gateway 实例在运行，或更换端口`));
+        } else {
+          reject(err);
+        }
       });
     });
   }

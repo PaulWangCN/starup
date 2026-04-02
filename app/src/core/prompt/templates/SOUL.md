@@ -78,7 +78,7 @@ hot_reload: false
 
 ## 注意
 
-如果你要重启 openclaw gateway，再重启前一定要告诉用户你准备重启 gateway。
+如果你要重启 starup gateway，再重启前一定要告诉用户你准备重启 gateway。
 
 ---
 

@@ -22,45 +22,56 @@ export class WebSocketServer {
   }
 
   async start(port: number): Promise<void> {
-    this.server = new WSServer({ port });
+    return new Promise((resolve, reject) => {
+      this.server = new WSServer({ port }, () => {
+        console.log(`[WebSocketServer] Listening on port ${port}`);
+        resolve();
+      });
 
-    this.server.on('connection', (ws, req) => {
-      const clientId = `ws-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-      console.log(`[WebSocketServer] Client connected: ${clientId} from ${req.socket.remoteAddress}`);
-
-      const client: GatewayClient = {
-        id: clientId,
-        role: 'operator',
-        ws,
-        metadata: {},
-        connectedAt: Date.now(),
-        lastPingAt: Date.now(),
-      };
-      this.gateway.registerClient(client);
-
-      ws.on('message', async (data) => {
-        try {
-          const message: WSMessage = JSON.parse(data.toString());
-          await this.handleMessage(client, ws, message);
-        } catch (err) {
-          this.send(ws, { type: 'error', payload: { message: 'Invalid JSON' } });
+      this.server.on('error', (err: any) => {
+        if (err.code === 'EADDRINUSE') {
+          reject(new Error(`WebSocket 端口 ${port} 已被占用，请检查是否有其他 gateway 实例在运行，或更换端口`));
+        } else {
+          reject(err);
         }
       });
 
-      ws.on('close', () => {
-        console.log(`[WebSocketServer] Client disconnected: ${clientId}`);
-        this.gateway.removeClient(clientId);
-      });
+      this.server.on('connection', (ws, req) => {
+        const clientId = `ws-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        console.log(`[WebSocketServer] Client connected: ${clientId} from ${req.socket.remoteAddress}`);
 
-      ws.on('error', (err) => {
-        console.error(`[WebSocketServer] Client error: ${clientId}`, err);
-      });
+        const client: GatewayClient = {
+          id: clientId,
+          role: 'operator',
+          ws,
+          metadata: {},
+          connectedAt: Date.now(),
+          lastPingAt: Date.now(),
+        };
+        this.gateway.registerClient(client);
 
-      // 发送欢迎消息
-      this.send(ws, { type: 'connected', payload: { clientId } });
+        ws.on('message', async (data) => {
+          try {
+            const message: WSMessage = JSON.parse(data.toString());
+            await this.handleMessage(client, ws, message);
+          } catch (err) {
+            this.send(ws, { type: 'error', payload: { message: 'Invalid JSON' } });
+          }
+        });
+
+        ws.on('close', () => {
+          console.log(`[WebSocketServer] Client disconnected: ${clientId}`);
+          this.gateway.removeClient(clientId);
+        });
+
+        ws.on('error', (err) => {
+          console.error(`[WebSocketServer] Client error: ${clientId}`, err);
+        });
+
+        // 发送欢迎消息
+        this.send(ws, { type: 'connected', payload: { clientId } });
+      });
     });
-
-    console.log(`[WebSocketServer] Listening on port ${port}`);
   }
 
   async stop(): Promise<void> {
