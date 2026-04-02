@@ -97,6 +97,12 @@ export class StarUpCore {
     // 确保配置文件存在
     await this.ensureConfigFiles();
     
+    // 注入 LLM 服务到 MemoryManager（用于 AI 召回）
+    if (this.llmService) {
+      this.memoryManager.setLLMService(this.llmService);
+      logger.info('StarUpCore', 'MemoryManager AI recall enabled');
+    }
+    
     // 加载 skills
     logger.info('StarUpCore', 'Loading skills...');
     await this.skillRegistry.initialize();

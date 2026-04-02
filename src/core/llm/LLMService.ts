@@ -24,16 +24,17 @@ export class LLMService {
    */
   async chat(
     messages: ConversationMessage[],
-    tools?: any[]
+    tools?: any[],
+    options?: { maxTokens?: number }
   ): Promise<{
     content: string;
     tool_calls?: any[];
   }> {
     switch (this.config.provider) {
       case 'deepseek':
-        return this.callDeepSeek(messages, tools);
+        return this.callDeepSeek(messages, tools, options);
       case 'openai':
-        return this.callOpenAI(messages, tools);
+        return this.callOpenAI(messages, tools, options);
       default:
         throw new Error(`Unsupported provider: ${this.config.provider}`);
     }
@@ -64,11 +65,12 @@ export class LLMService {
    */
   private async callDeepSeek(
     messages: ConversationMessage[],
-    tools?: any[]
+    tools?: any[],
+    options?: { maxTokens?: number }
   ): Promise<{ content: string; tool_calls?: any[] }> {
     const url = this.config.baseUrl || 'https://api.deepseek.com/v1/chat/completions';
 
-    const payload = this.buildPayload(messages, tools);
+    const payload = this.buildPayload(messages, tools, options);
 
     try {
       const response = await axios.post(url, payload, {
@@ -94,11 +96,12 @@ export class LLMService {
    */
   private async callOpenAI(
     messages: ConversationMessage[],
-    tools?: any[]
+    tools?: any[],
+    options?: { maxTokens?: number }
   ): Promise<{ content: string; tool_calls?: any[] }> {
     const url = this.config.baseUrl || 'https://api.openai.com/v1/chat/completions';
 
-    const payload = this.buildPayload(messages, tools);
+    const payload = this.buildPayload(messages, tools, options);
 
     try {
       const response = await axios.post(url, payload, {
@@ -154,7 +157,8 @@ export class LLMService {
    */
   private buildPayload(
     messages: ConversationMessage[],
-    tools?: any[]
+    tools?: any[],
+    options?: { maxTokens?: number }
   ): any {
     const payload: any = {
       model: this.config.model,
@@ -165,7 +169,7 @@ export class LLMService {
         ...(m.tool_call_id && { tool_call_id: m.tool_call_id }),
       })),
       temperature: this.config.temperature ?? 0.7,
-      max_tokens: this.config.maxTokens ?? 4096,
+      max_tokens: options?.maxTokens ?? this.config.maxTokens ?? 4096,
     };
 
     if (tools && tools.length > 0) {

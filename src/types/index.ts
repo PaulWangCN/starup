@@ -91,11 +91,55 @@ export interface SessionMemory {
   longTerm: string;            // 长期记忆文件路径
 }
 
+/**
+ * 记忆类型
+ * - user: 用户画像、偏好、背景知识（始终私有）
+ * - feedback: 用户对工作方式的指导（默认私有）
+ * - project: 项目进展、目标、事件（偏向团队）
+ * - reference: 外部系统指针（通常团队）
+ */
+export type MemoryType = 'user' | 'feedback' | 'project' | 'reference';
+
+/**
+ * 记忆文件 frontmatter 结构
+ */
+export interface MemoryFrontmatter {
+  name: string;
+  description: string;
+  type: MemoryType;
+  created?: string;            // ISO 日期
+  updated?: string;            // ISO 日期
+  tags?: string[];
+}
+
+/**
+ * 解析后的记忆条目
+ */
+export interface ParsedMemory {
+  path: string;                // 文件路径
+  frontmatter: MemoryFrontmatter;
+  content: string;             // 正文内容（不含 frontmatter）
+  mtime: number;               // 修改时间
+}
+
+/**
+ * AI 召回结果
+ */
+export interface RelevantMemory {
+  memory: ParsedMemory;
+  reason: string;              // 为什么相关
+  freshness: string;           // 新鲜度描述
+}
+
+/**
+ * 记忆条目（向后兼容）
+ */
 export interface MemoryEntry {
   timestamp: number;
   topic: string;
   summary: string;
   importance: number;
+  type?: MemoryType;
 }
 
 // ==================== Tool 类型 ====================

@@ -6,10 +6,11 @@ StarUp 的核心运行时环境，为 AI 助手提供"操作系统"级别的基�
 
 - 🤖 **Session 管理**: 主会话 + 子代理架构，支持任务隔离和结果回流
 - 🔧 **工具系统**: read/write/edit/exec/web_search 等核心工具
-- 🧠 **记忆系统**: 四级记忆架构（短期/日记忆/长期/向量）
+- 🧠 **AI 驱动记忆**: 智能记忆召回、新鲜度标注、YAML frontmatter 格式
 - 📦 **Skills 系统**: 模块化扩展，支持热加载
 - 💬 **通道集成**: 飞书、钉钉、Telegram 等平台接入
 - 🎯 **LLM 支持**: DeepSeek、OpenAI 等主流模型
+- 🗜️ **上下文压缩**: 多层压缩策略（Micro/Session/Full Compact）
 
 ## 快速开始
 
@@ -293,6 +294,70 @@ tools:
 - `skills/my-skill/` (项目内置，若存在)
 - `./.starup/skills/my-skill/` (本地目录，推荐)
 
+## 记忆系统
+
+StarUp 采用 AI 驱动的持久记忆架构，让 AI 助手越用越懂你。
+
+### 记忆架构
+
+```
+~/.starup/memory/
+├── MEMORY.md              # 记忆索引
+├── user/                  # 用户画像（始终私有）
+├── feedback/              # 工作方式反馈
+├── project/               # 项目相关
+└── reference/             # 外部系统引用
+```
+
+### 核心特性
+
+- **AI 驱动召回**: 使用 LLM 判断记忆相关性，而非简单关键词匹配
+- **新鲜度标注**: 自动标注记忆年龄（today/yesterday/N days ago），超过 1 天附加过期警告
+- **使用前验证**: 系统提示强制要求验证记忆内容（检查文件是否存在、函数是否还在）
+- **Frontmatter 格式**: 结构化的 YAML 元数据，支持类型、标签、时间戳
+
+### 记忆类型
+
+| 类型 | 用途 | 示例 |
+|------|------|------|
+| `user` | 用户画像、偏好、背景 | 技术栈、学习偏好 |
+| `feedback` | 工作方式指导 | 回复风格偏好 |
+| `project` | 项目进展、目标 | 架构决策、截止日期 |
+| `reference` | 外部系统指针 | Grafana、Slack 链接 |
+
+### 创建记忆
+
+```markdown
+---
+name: 用户偏好-简洁回复
+description: 用户不希望在每次回复末尾加总结
+type: feedback
+tags: [communication, style]
+---
+
+不要在回复末尾总结刚做了什么，用户能看到 diff。
+
+**Why:** 用户明确要求过"stop summarizing what you just did"
+**How to apply:** 所有回复结束时，直接结束，不加回顾性总结。
+```
+
+### 程序化使用
+
+```typescript
+import { MemoryManager } from './src/core/memory/MemoryManager';
+
+const mm = new MemoryManager(llmService);
+
+// AI 驱动召回
+const relevant = await mm.findRelevantMemories("用户喜欢什么样的回复风格？");
+
+for (const r of relevant) {
+  console.log(r.memory.frontmatter.name);  // "用户偏好-简洁回复"
+  console.log(r.reason);                    // AI 选择的原因
+  console.log(r.freshness);                 // "today" / "3 days ago"
+}
+```
+
 ## 开发计划
 
 ### Phase 1 (MVP) ✅
@@ -306,8 +371,9 @@ tools:
 - [ ] ACP 协议对接
 - [x] Cron & Heartbeat 调度器
 - [x] 钉钉 / Telegram Channel
+- [x] AI 驱动记忆系统（召回、新鲜度、frontmatter）
 - [ ] 微信 Channel 完整实现
-- [ ] 语义记忆检索
+- [ ] 语义记忆检索（向量数据库）
 
 ### Phase 3
 - [ ] 全面支持 ClawHub 和 SkillHub
