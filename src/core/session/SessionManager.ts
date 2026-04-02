@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import path from 'path';
+import * as path from 'path';
 import {
   Session,
   SessionType,
@@ -48,7 +48,7 @@ export class SessionManager {
       memory: {
         shortTerm: [],
         dailyLog: this.getDailyLogPath(),
-        longTerm: path.join(process.cwd(), '.starup', 'MEMORY.md'),
+        longTerm: path.join(process.cwd(), '.starup', 'memory', 'MEMORY.md'),
       },
       allowedTools: ['read', 'write', 'edit', 'exec', 'fetch', 'web_fetch', 'schedule_task', 'list_scheduled_tasks', 'cancel_scheduled_task', 'list_skills'],
       memoryAccess: 'write',
@@ -92,7 +92,7 @@ export class SessionManager {
       memory: {
         shortTerm: [],
         dailyLog: this.getDailyLogPath(),
-        longTerm: path.join(process.cwd(), '.starup', 'MEMORY.md'),
+        longTerm: path.join(process.cwd(), '.starup', 'memory', 'MEMORY.md'),
       },
       allowedTools: ['read', 'write', 'edit', 'exec', 'fetch', 'web_fetch', 'schedule_task', 'list_scheduled_tasks', 'cancel_scheduled_task', 'list_skills'],
       memoryAccess: 'write',
@@ -282,7 +282,7 @@ export class SessionManager {
 
   private getDailyLogPath(): string {
     const date = new Date().toISOString().split('T')[0];
-    return `memory/${date}.md`;
+    return path.join(process.cwd(), '.starup', 'memory', `${date}.md`);
   }
 
   private setupTimeout(session: Session): void {

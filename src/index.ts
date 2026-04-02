@@ -301,6 +301,20 @@ export class StarUpCore {
       return { thinking: [], finalReply: 'LLM service not configured' };
     }
 
+    // 注入相关记忆到当前会话上下文
+    try {
+      const memoryContexts = await this.memoryManager.injectRelevantMemories(message, session);
+      if (memoryContexts.length > 0) {
+        this.sessionManager.addMessage(sessionId, {
+          role: 'system',
+          content: `[相关记忆]\n${memoryContexts.join('\n\n')}`,
+          timestamp: Date.now(),
+        });
+      }
+    } catch (e) {
+      logger.debug('StarUpCore', 'Failed to inject memories:', e);
+    }
+
     const tools = this.toolRegistry.getToolDescriptions();
     const maxIterations = 20;
     let reactiveCompactAttempted = false;
