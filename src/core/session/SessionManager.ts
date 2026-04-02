@@ -9,6 +9,7 @@ import {
   ConversationMessage,
 } from '../../types';
 import { estimateMessagesTokens } from '../compact/tokens';
+import { toolRegistry } from '../tools/ToolRegistry';
 
 /**
  * 会话管理器
@@ -50,7 +51,7 @@ export class SessionManager {
         dailyLog: this.getDailyLogPath(),
         longTerm: path.join(process.cwd(), '.starup', 'memory', 'MEMORY.md'),
       },
-      allowedTools: ['read', 'write', 'edit', 'exec', 'fetch', 'web_fetch', 'schedule_task', 'list_scheduled_tasks', 'cancel_scheduled_task', 'list_skills'],
+      allowedTools: toolRegistry.getAllToolNames(),
       memoryAccess: 'write',
       timeout: 300,
       callbackToParent: false,
@@ -94,7 +95,7 @@ export class SessionManager {
         dailyLog: this.getDailyLogPath(),
         longTerm: path.join(process.cwd(), '.starup', 'memory', 'MEMORY.md'),
       },
-      allowedTools: ['read', 'write', 'edit', 'exec', 'fetch', 'web_fetch', 'schedule_task', 'list_scheduled_tasks', 'cancel_scheduled_task', 'list_skills'],
+      allowedTools: toolRegistry.getAllToolNames(),
       memoryAccess: 'write',
       timeout: 300,
       callbackToParent: false,

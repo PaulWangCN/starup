@@ -22,6 +22,7 @@
   "license": "MIT",
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.60.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/node": "^22.13.17",
     "@types/node-telegram-bot-api": "^0.64.14",
     "@types/uuid": "^10.0.0",

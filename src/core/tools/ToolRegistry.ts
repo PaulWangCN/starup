@@ -49,6 +49,10 @@ export class ToolRegistry {
     return Array.from(this.tools.values());
   }
 
+  getAllToolNames(): string[] {
+    return Array.from(this.tools.keys());
+  }
+
   getToolDescriptions(): any[] {
     return this.getAll().map((tool) => {
       const parameters = tool.parameters || [];
