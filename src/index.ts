@@ -337,7 +337,7 @@ export class StarUpCore {
       const mc = applyMicroCompact(session.context.messages);
       if (mc.modified) {
         session.context.tokenCount = estimateMessagesTokens(session.context.messages);
-        console.log(`[StarUpCore] Micro-compact cleared ${mc.clearedCount} old tool results`);
+        logger.debug('StarUpCore', `Micro-compact cleared ${mc.clearedCount} old tool results`);
       }
 
       // 第2层：自动压缩（迭代中再次检查）
