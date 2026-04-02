@@ -48,6 +48,9 @@ temp/
 # Session snapshots
 .starup/snapshots/
 
+# Skills index (auto-generated)
+.starup/skills_index.md
+
 
 # But keep example skill's dist
 !skills/**/dist/
