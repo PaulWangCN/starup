@@ -88,6 +88,9 @@ export class SessionSnapshotManager {
 
     // 保存快照到文件
     await this.saveSnapshot(snapshot);
+
+    // 限制每个会话的快照数量，防止无限堆积
+    await this.retainLatestSnapshots(session.id, 10);
     
     console.log(`[SessionSnapshotManager] Snapshot created for session ${session.id}`);
     return snapshot;
@@ -421,6 +424,41 @@ export class SessionSnapshotManager {
     const filepath = path.join(this.snapshotDir, filename);
     
     await fs.promises.writeFile(filepath, JSON.stringify(snapshot, null, 2), 'utf-8');
+  }
+
+  /**
+   * 限制单个会话的快照数量，保留最新的 N 个
+   * @param sessionId 会话ID
+   * @param maxCount 最大保留数量
+   */
+  private async retainLatestSnapshots(sessionId: string, maxCount: number): Promise<void> {
+    try {
+      const snapshots = await this.listSnapshots(sessionId);
+      if (snapshots.length <= maxCount) {
+        return;
+      }
+
+      // 按时间戳升序排序，删除最旧的
+      const toDelete = snapshots
+        .sort((a, b) => a.timestamp - b.timestamp)
+        .slice(0, snapshots.length - maxCount);
+
+      for (const snapshot of toDelete) {
+        const snapshotPath = path.join(
+          this.snapshotDir,
+          `${sessionId}_${snapshot.timestamp}.json`
+        );
+        if (fs.existsSync(snapshotPath)) {
+          await fs.promises.unlink(snapshotPath);
+        }
+      }
+
+      console.log(
+        `[SessionSnapshotManager] Retained ${maxCount} snapshots for ${sessionId}, cleaned ${toDelete.length}`
+      );
+    } catch (error) {
+      console.error(`[SessionSnapshotManager] Failed to retain latest snapshots:`, error);
+    }
   }
 
   /**

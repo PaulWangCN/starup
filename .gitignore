@@ -45,6 +45,9 @@ __pycache__/
 tmp/
 temp/
 
+# Session snapshots
+.starup/snapshots/
+
 
 # But keep example skill's dist
 !skills/**/dist/
