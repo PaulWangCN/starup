@@ -164,6 +164,181 @@ export class ToolRegistry {
   // ==================== 核心工具注册 ====================
 
   private registerCoreTools(): void {
+    // fetch: 发起 HTTP 网络请求
+    this.register({
+      name: 'fetch',
+      description: '发起 HTTP 网络请求，支持 GET/POST/PUT/DELETE 等方法。用于调用外部 API、获取网页内容、下载数据等。\n注意：如果某个 skill 已经提供了专门的工具（如 web_search、weather），请优先使用该 skill 的工具。',
+      parameters: [
+        { name: 'url', type: 'string', description: '请求的 URL 地址', required: true },
+        { name: 'method', type: 'string', description: 'HTTP 方法: GET、POST、PUT、DELETE、PATCH 等，默认为 GET', required: false, default: 'GET' },
+        { name: 'headers', type: 'object', description: '请求头对象，如 { "Content-Type": "application/json" }', required: false },
+        { name: 'body', type: 'string', description: '请求体（用于 POST/PUT/PATCH），可以是 JSON 字符串或表单数据', required: false },
+        { name: 'timeout', type: 'number', description: '超时时间（秒），默认 30 秒，最大 120 秒', required: false, default: 30 },
+      ],
+      handler: async (args) => {
+        try {
+          const url = new URL(args.url);
+          const timeout = Math.min((args.timeout || 30) * 1000, 120000);
+          
+          // 构建请求选项
+          const fetchOptions: RequestInit = {
+            method: args.method?.toUpperCase() || 'GET',
+            headers: args.headers || {},
+          };
+          
+          // 添加请求体（如果不是 GET/HEAD）
+          if (args.body && !['GET', 'HEAD'].includes(fetchOptions.method as string)) {
+            fetchOptions.body = args.body;
+          }
+          
+          // 使用 AbortController 实现超时
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), timeout);
+          fetchOptions.signal = controller.signal;
+          
+          const response = await fetch(url.toString(), fetchOptions);
+          clearTimeout(timeoutId);
+          
+          // 读取响应内容
+          const contentType = response.headers.get('content-type') || '';
+          let data: any;
+          
+          if (contentType.includes('application/json')) {
+            data = await response.json();
+          } else {
+            const text = await response.text();
+            // 如果内容太大，进行截断
+            const maxLen = 50000;
+            data = text.length > maxLen ? text.substring(0, maxLen) + '\n... (content truncated)' : text;
+          }
+          
+          return {
+            success: response.ok,
+            data: {
+              status: response.status,
+              statusText: response.statusText,
+              headers: (() => {
+                const h: Record<string, string> = {};
+                response.headers.forEach((value, key) => { h[key] = value; });
+                return h;
+              })(),
+              data: data,
+            },
+          };
+        } catch (error: any) {
+          if (error.name === 'AbortError') {
+            return { success: false, error: 'Request timeout' };
+          }
+          return { success: false, error: `Request failed: ${error.message}` };
+        }
+      },
+    });
+
+    // web_fetch: 获取网页内容（带内容提取功能）
+    this.register({
+      name: 'web_fetch',
+      description: '获取网页内容，支持 HTML 到文本/Markdown 的转换和长度限制。专门用于网页抓取和内容提取。',
+      parameters: [
+        { name: 'url', type: 'string', description: '要获取的网页 URL', required: true },
+        { name: 'extractMode', type: 'string', description: '内容提取模式: text（纯文本）、markdown（Markdown 格式），默认为 text', required: false, default: 'text' },
+        { name: 'maxChars', type: 'number', description: '最大返回字符数，默认 8000', required: false, default: 8000 },
+        { name: 'timeout', type: 'number', description: '超时时间（秒），默认 30 秒', required: false, default: 30 },
+      ],
+      handler: async (args) => {
+        try {
+          const timeout = Math.min((args.timeout || 30) * 1000, 120000);
+          const maxChars = Math.min(args.maxChars || 8000, 50000);
+          const extractMode = args.extractMode || 'text';
+          
+          // 使用 AbortController 实现超时
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), timeout);
+          
+          const response = await fetch(args.url, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.5',
+            },
+          });
+          clearTimeout(timeoutId);
+          
+          if (!response.ok) {
+            return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };
+          }
+          
+          let html = await response.text();
+          
+          // 简单的 HTML 到文本转换
+          let content = html;
+          if (extractMode === 'text' || extractMode === 'markdown') {
+            // 移除 script 和 style 标签及其内容
+            content = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+            content = content.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+            content = content.replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '');
+            
+            // 将常见块级标签替换为换行符
+            content = content.replace(/<(\/p|br|div|h[1-6]|li|tr)[^>]*>/gi, '\n');
+            content = content.replace(/<(p|div|h[1-6]|li|td|th)[^>]*>/gi, '\n');
+            
+            // 将表格相关标签转换为文本格式
+            content = content.replace(/<td[^>]*>/gi, ' ');
+            content = content.replace(/<th[^>]*>/gi, ' ');
+            content = content.replace(/<tr[^>]*>/gi, '\n');
+            
+            // 移除所有 HTML 标签
+            content = content.replace(/<[^>]+>/g, '');
+            
+            // 解码 HTML 实体
+            content = content.replace(/&nbsp;/g, ' ');
+            content = content.replace(/&amp;/g, '&');
+            content = content.replace(/&lt;/g, '<');
+            content = content.replace(/&gt;/g, '>');
+            content = content.replace(/&quot;/g, '"');
+            content = content.replace(/&#39;/g, "'");
+            content = content.replace(/&mdash;/g, '—');
+            content = content.replace(/&ndash;/g, '–');
+            content = content.replace(/&hellip;/g, '...');
+            content = content.replace(/&[a-zA-Z]+;/g, ''); // 移除其他未处理的实体
+            
+            // 清理空白字符
+            content = content.replace(/\r\n/g, '\n');
+            content = content.replace(/\r/g, '\n');
+            content = content.replace(/\t/g, ' ');
+            content = content.replace(/ +/g, ' ');
+            content = content.replace(/\n +/g, '\n');
+            content = content.replace(/ +\n/g, '\n');
+            content = content.replace(/\n{3,}/g, '\n\n');
+            
+            content = content.trim();
+          }
+          
+          // 截断内容
+          const truncated = content.length > maxChars;
+          if (truncated) {
+            content = content.substring(0, maxChars) + '\n... (content truncated)';
+          }
+          
+          return {
+            success: true,
+            data: {
+              url: args.url,
+              title: (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/<[^>]+>/g, '').trim(),
+              content: content,
+              truncated: truncated,
+              length: content.length,
+            },
+          };
+        } catch (error: any) {
+          if (error.name === 'AbortError') {
+            return { success: false, error: 'Request timeout' };
+          }
+          return { success: false, error: `Failed to fetch webpage: ${error.message}` };
+        }
+      },
+    });
+
     // read: 读取文件
     this.register({
       name: 'read',
