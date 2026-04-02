@@ -42,6 +42,12 @@ Thumbs.db
 coverage/
 .nyc_output/
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
 # Temporary files
 *.tmp
 *.temp
