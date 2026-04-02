@@ -146,6 +146,14 @@ export class Gateway {
   }
 
   /**
+   * 中断当前执行的任务
+   */
+  abort(reason: string = '用户中断'): void {
+    console.log(`[Gateway] Aborting current task: ${reason}`);
+    this.core.abort(reason);
+  }
+
+  /**
    * 注册客户端
    */
   registerClient(client: GatewayClient): void {

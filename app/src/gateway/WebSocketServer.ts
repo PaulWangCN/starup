@@ -9,7 +9,7 @@ import { GatewayClient, ClientRole, StreamChunk } from './types';
 
 interface WSMessage {
   id?: string;
-  type: 'ping' | 'chat' | 'status' | 'register';
+  type: 'ping' | 'chat' | 'status' | 'register' | 'abort';
   payload?: any;
 }
 
@@ -107,6 +107,11 @@ export class WebSocketServer {
 
       case 'status':
         this.send(ws, { type: 'status', payload: this.gateway.getStatus() });
+        break;
+
+      case 'abort':
+        this.gateway.abort('用户通过 WebSocket 中断');
+        this.send(ws, { type: 'aborted', payload: { message: '已发送中断信号' } });
         break;
 
       case 'chat': {

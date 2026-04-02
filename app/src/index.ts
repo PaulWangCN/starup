@@ -29,6 +29,15 @@ export interface ProcessMessageCallbacks {
   onToolResult?: (name: string, result: any) => void;
   onStreamChunk?: (chunk: string) => void;
   onIterationStart?: (iteration: number) => void;
+  onAbort?: (reason: string) => void;
+}
+
+/**
+ * 中断信号类型
+ */
+export interface AbortSignal {
+  aborted: boolean;
+  reason?: string;
 }
 
 /**
@@ -44,6 +53,9 @@ export class StarUpCore {
   onScheduledTaskComplete?: (content: string) => void;
   private config: SystemConfig;
   private systemPrompt: string | null = null;
+  
+  // 中断控制
+  private abortSignal: AbortSignal | null = null;
 
   constructor(config?: Partial<SystemConfig>) {
     this.sessionManager = sessionManager;
@@ -238,6 +250,25 @@ export class StarUpCore {
   }
 
   /**
+   * 中断当前执行的任务
+   */
+  abort(reason: string = '用户中断'): void {
+    if (this.abortSignal) {
+      this.abortSignal.aborted = true;
+      this.abortSignal.reason = reason;
+    }
+  }
+
+  /**
+   * 检查是否被中断，如果被中断则抛出错误
+   */
+  private checkAborted(): void {
+    if (this.abortSignal?.aborted) {
+      throw new Error(`执行被中断: ${this.abortSignal.reason || '用户取消'}`);
+    }
+  }
+
+  /**
    * 处理消息 - 支持 ReAct 多轮工具调用
    * 
    * 返回结构包含思考过程和最终回复
@@ -246,7 +277,10 @@ export class StarUpCore {
     sessionId: string,
     message: string,
     callbacks?: ProcessMessageCallbacks
-  ): Promise<{ thinking: string[]; finalReply: string }> {
+  ): Promise<{ thinking: string[]; finalReply: string; aborted?: boolean }> {
+    // 重置中断信号
+    this.abortSignal = { aborted: false };
+    
     const session = this.sessionManager.getSession(sessionId);
     if (!session) {
       throw new Error(`Session ${sessionId} not found`);
@@ -276,104 +310,125 @@ export class StarUpCore {
     const tools = this.toolRegistry.getToolDescriptions();
     const maxIterations = 20;
 
-    for (let iteration = 0; iteration < maxIterations; iteration++) {
-      callbacks?.onIterationStart?.(iteration);
-      const response = await this.llmService.chatStream(session.context.messages, tools, {
-        onChunk: callbacks?.onStreamChunk,
-      });
+    try {
+      for (let iteration = 0; iteration < maxIterations; iteration++) {
+        this.checkAborted();
+        callbacks?.onIterationStart?.(iteration);
+        const response = await this.llmService.chatStream(session.context.messages, tools, {
+          onChunk: callbacks?.onStreamChunk,
+          abortSignal: this.abortSignal,
+        });
 
-      // 记录 AI 的思考/回复内容
-      if (response.content) {
-        thinking.push(response.content);
-        if (callbacks?.onThinking) {
-          callbacks.onThinking(response.content);
+        // 记录 AI 的思考/回复内容
+        if (response.content) {
+          thinking.push(response.content);
+          if (callbacks?.onThinking) {
+            callbacks.onThinking(response.content);
+          }
         }
-      }
 
-      // 如果没有工具调用，直接返回
-      if (!response.tool_calls || response.tool_calls.length === 0) {
-        let content = response.content || '';
-        
-        // 截断恢复
-        if (this.seemsTruncated(content)) {
+        // 如果没有工具调用，直接返回
+        if (!response.tool_calls || response.tool_calls.length === 0) {
+          let content = response.content || '';
+          
+          // 截断恢复
+          if (this.seemsTruncated(content)) {
+            this.sessionManager.addMessage(sessionId, {
+              role: 'assistant',
+              content,
+              timestamp: Date.now(),
+            });
+            this.sessionManager.addMessage(sessionId, {
+              role: 'system',
+              content: '你的上一条回复似乎被截断了，请继续完成你的回复。',
+              timestamp: Date.now(),
+            });
+            const continuation = await this.llmService.chatStream(session.context.messages, tools, {
+              onChunk: callbacks?.onStreamChunk,
+              abortSignal: this.abortSignal,
+            });
+            content = content + (continuation.content || '');
+            if (continuation.content) {
+              thinking.push(continuation.content);
+            }
+          }
+
           this.sessionManager.addMessage(sessionId, {
             role: 'assistant',
             content,
             timestamp: Date.now(),
           });
-          this.sessionManager.addMessage(sessionId, {
-            role: 'system',
-            content: '你的上一条回复似乎被截断了，请继续完成你的回复。',
-            timestamp: Date.now(),
-          });
-          const continuation = await this.llmService.chatStream(session.context.messages, tools, {
-            onChunk: callbacks?.onStreamChunk,
-          });
-          content = content + (continuation.content || '');
-          if (continuation.content) {
-            thinking.push(continuation.content);
-          }
+          return { thinking, finalReply: content };
         }
 
+        // 有工具调用，添加到会话
         this.sessionManager.addMessage(sessionId, {
           role: 'assistant',
-          content,
+          content: response.content || '',
+          tool_calls: response.tool_calls,
           timestamp: Date.now(),
         });
-        return { thinking, finalReply: content };
+
+        // 执行所有工具调用
+        for (const toolCall of response.tool_calls) {
+          this.checkAborted();
+          
+          const toolName = toolCall.function.name;
+          const toolArgs = JSON.parse(toolCall.function.arguments);
+          
+          if (callbacks?.onToolCall) {
+            callbacks.onToolCall(toolName, toolArgs);
+          }
+
+          const result = await this.toolRegistry.execute(toolName, toolArgs, session);
+          
+          if (callbacks?.onToolResult) {
+            callbacks.onToolResult(toolName, result);
+          }
+
+          this.sessionManager.addMessage(sessionId, {
+            role: 'tool',
+            content: JSON.stringify(result),
+            tool_call_id: toolCall.id,
+            timestamp: Date.now(),
+          });
+        }
       }
 
-      // 有工具调用，添加到会话
+      // 达到最大迭代次数
+      this.checkAborted();
       this.sessionManager.addMessage(sessionId, {
-        role: 'assistant',
-        content: response.content || '',
-        tool_calls: response.tool_calls,
+        role: 'system',
+        content: '已达到最大迭代次数。请基于已收集的信息给出当前进展和下一步建议。',
         timestamp: Date.now(),
       });
 
-      // 执行所有工具调用
-      for (const toolCall of response.tool_calls) {
-        const toolName = toolCall.function.name;
-        const toolArgs = JSON.parse(toolCall.function.arguments);
-        
-        if (callbacks?.onToolCall) {
-          callbacks.onToolCall(toolName, toolArgs);
-        }
+      const finalResponse = await this.llmService.chatStream(session.context.messages, tools, {
+        onChunk: callbacks?.onStreamChunk,
+        abortSignal: this.abortSignal,
+      });
+      const finalReply = finalResponse.content || '处理超时，请重试';
+      
+      this.sessionManager.addMessage(sessionId, {
+        role: 'assistant',
+        content: finalReply,
+        timestamp: Date.now(),
+      });
 
-        const result = await this.toolRegistry.execute(toolName, toolArgs, session);
-        
-        if (callbacks?.onToolResult) {
-          callbacks.onToolResult(toolName, result);
-        }
-
-        this.sessionManager.addMessage(sessionId, {
-          role: 'tool',
-          content: JSON.stringify(result),
-          tool_call_id: toolCall.id,
-          timestamp: Date.now(),
-        });
+      return { thinking, finalReply };
+    } catch (error: any) {
+      // 检查是否是被中断的错误
+      if (this.abortSignal?.aborted || error.message?.includes('中断')) {
+        const abortReason = this.abortSignal?.reason || '用户中断';
+        callbacks?.onAbort?.(abortReason);
+        return { 
+          thinking, 
+          finalReply: `[已中断] ${abortReason}`,
+          aborted: true 
+        };
       }
+      throw error;
     }
-
-    // 达到最大迭代次数
-    this.sessionManager.addMessage(sessionId, {
-      role: 'system',
-      content: '已达到最大迭代次数。请基于已收集的信息给出当前进展和下一步建议。',
-      timestamp: Date.now(),
-    });
-
-    const finalResponse = await this.llmService.chatStream(session.context.messages, tools, {
-      onChunk: callbacks?.onStreamChunk,
-    });
-    const finalReply = finalResponse.content || '处理超时，请重试';
-    
-    this.sessionManager.addMessage(sessionId, {
-      role: 'assistant',
-      content: finalReply,
-      timestamp: Date.now(),
-    });
-
-    return { thinking, finalReply };
   }
 
   /**

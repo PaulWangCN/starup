@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { LLMConfig, ConversationMessage } from '../../types';
+import { AbortSignal } from '../../index';
 
 /**
  * LLM 服务
@@ -47,6 +48,7 @@ export class LLMService {
     tools?: any[],
     callbacks?: {
       onChunk?: (chunk: string) => void;
+      abortSignal?: AbortSignal;
     }
   ): Promise<{ content: string; tool_calls?: any[] }> {
     switch (this.config.provider) {
@@ -125,7 +127,7 @@ export class LLMService {
   private async callDeepSeekStream(
     messages: ConversationMessage[],
     tools?: any[],
-    callbacks?: { onChunk?: (chunk: string) => void }
+    callbacks?: { onChunk?: (chunk: string) => void; abortSignal?: AbortSignal }
   ): Promise<{ content: string; tool_calls?: any[] }> {
     const url = this.config.baseUrl || 'https://api.deepseek.com/v1/chat/completions';
     const payload = this.buildPayload(messages, tools);
@@ -140,7 +142,7 @@ export class LLMService {
   private async callOpenAIStream(
     messages: ConversationMessage[],
     tools?: any[],
-    callbacks?: { onChunk?: (chunk: string) => void }
+    callbacks?: { onChunk?: (chunk: string) => void; abortSignal?: AbortSignal }
   ): Promise<{ content: string; tool_calls?: any[] }> {
     const url = this.config.baseUrl || 'https://api.openai.com/v1/chat/completions';
     const payload = this.buildPayload(messages, tools);
@@ -181,9 +183,21 @@ export class LLMService {
   private async parseSSEStream(
     url: string,
     payload: any,
-    callbacks?: { onChunk?: (chunk: string) => void }
+    callbacks?: { onChunk?: (chunk: string) => void; abortSignal?: AbortSignal }
   ): Promise<{ content: string; tool_calls?: any[] }> {
     const TIMEOUT_MS = 120000; // 2分钟超时
+    const abortSignal = callbacks?.abortSignal;
+    
+    // 创建 axios 的 AbortController
+    const axiosAbortController = new AbortController();
+    
+    // 监听外部中断信号
+    const checkAbort = () => {
+      if (abortSignal?.aborted) {
+        axiosAbortController.abort(abortSignal.reason || '用户中断');
+      }
+    };
+    const abortCheckInterval = setInterval(checkAbort, 100);
     
     try {
       const response = await axios.post(url, payload, {
@@ -194,6 +208,7 @@ export class LLMService {
         },
         responseType: 'stream',
         timeout: TIMEOUT_MS,
+        signal: axiosAbortController.signal,
       });
 
       const stream = response.data as NodeJS.ReadableStream;
@@ -207,11 +222,21 @@ export class LLMService {
         const timeoutTimer = setTimeout(() => {
           if (!isCompleted) {
             isCompleted = true;
+            clearInterval(abortCheckInterval);
             reject(new Error(`Stream timeout after ${TIMEOUT_MS}ms`));
           }
         }, TIMEOUT_MS);
 
         stream.on('data', (chunk: Buffer) => {
+          // 检查是否被中断
+          if (abortSignal?.aborted && !isCompleted) {
+            isCompleted = true;
+            clearTimeout(timeoutTimer);
+            clearInterval(abortCheckInterval);
+            reject(new Error(`执行被中断: ${abortSignal.reason || '用户取消'}`));
+            return;
+          }
+          
           buffer += chunk.toString('utf-8');
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
@@ -226,6 +251,7 @@ export class LLMService {
               if (!isCompleted) {
                 isCompleted = true;
                 clearTimeout(timeoutTimer);
+                clearInterval(abortCheckInterval);
                 const tool_calls = toolCallsBuffer.length > 0 ? toolCallsBuffer : undefined;
                 resolve({ content, tool_calls });
               }
@@ -276,6 +302,7 @@ export class LLMService {
           if (!isCompleted) {
             isCompleted = true;
             clearTimeout(timeoutTimer);
+            clearInterval(abortCheckInterval);
             const tool_calls = toolCallsBuffer.length > 0 ? toolCallsBuffer : undefined;
             resolve({ content, tool_calls });
           }
@@ -285,11 +312,17 @@ export class LLMService {
           if (!isCompleted) {
             isCompleted = true;
             clearTimeout(timeoutTimer);
+            clearInterval(abortCheckInterval);
             reject(new Error(`Stream error: ${err.message}`));
           }
         });
       });
     } catch (error: any) {
+      clearInterval(abortCheckInterval);
+      // 检查是否是被中断的错误
+      if (axiosAbortController.signal.aborted || error.message?.includes('中断')) {
+        throw new Error(`执行被中断: ${abortSignal?.reason || '用户取消'}`);
+      }
       console.error('[LLMService] Stream API error:', error.response?.data || error.message);
       throw new Error(`Stream API error: ${error.message}`);
     }
