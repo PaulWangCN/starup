@@ -570,8 +570,9 @@ _按时间顺序记录的操作_
       }
 
       return results.slice(0, this.MAX_RELEVANT_MEMORIES);
-    } catch (error) {
-      logger.error('MemoryManager', `AI selection failed, falling back: ${error}`);
+    } catch (error: any) {
+      const errorMsg = error?.message || String(error);
+      logger.error('MemoryManager', `AI selection failed, falling back: ${errorMsg}`);
       return this.fallbackKeywordSearch(query, validMemories);
     }
   }

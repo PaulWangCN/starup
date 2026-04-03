@@ -198,7 +198,7 @@ export class LLMService {
     tools?: any[],
     options?: { maxTokens?: number }
   ): Promise<{ content: string; tool_calls?: any[] }> {
-    const url = this.config.baseUrl || 'http://localhost:11434/api/chat';
+    const url = this.getOllamaUrl();
 
     const payload = {
       model: this.config.model,
@@ -225,7 +225,7 @@ export class LLMService {
       };
     } catch (error: any) {
       const errorDetail = error.response?.data
-        ? JSON.stringify(error.response.data, null, 2)
+        ? (typeof error.response.data === 'string' ? error.response.data : JSON.stringify(error.response.data))
         : error.message;
       logger.error('LLMService', `Ollama API error: ${errorDetail}`);
       throw new Error(`Ollama API error: ${errorDetail}`);
@@ -240,7 +240,7 @@ export class LLMService {
     tools?: any[],
     callbacks?: { onChunk?: (chunk: string) => void }
   ): Promise<{ content: string; tool_calls?: any[] }> {
-    const url = this.config.baseUrl || 'http://localhost:11434/api/chat';
+    const url = this.getOllamaUrl();
     const payload = {
       model: this.config.model,
       messages: messages.map((m) => ({
@@ -320,11 +320,25 @@ export class LLMService {
       });
     } catch (error: any) {
       const errorDetail = error.response?.data
-        ? JSON.stringify(error.response.data, null, 2)
+        ? (typeof error.response.data === 'string' ? error.response.data : JSON.stringify(error.response.data))
         : error.message;
       logger.error('LLMService', `Ollama Stream API error: ${errorDetail}`);
       throw new Error(`Ollama Stream API error: ${errorDetail}`);
     }
+  }
+
+  /**
+   * 获取 Ollama API URL
+   * 自动处理 baseUrl 格式
+   */
+  private getOllamaUrl(): string {
+    const baseUrl = this.config.baseUrl || 'http://localhost:11434';
+    // 如果已经包含 /api/chat，直接使用
+    if (baseUrl.endsWith('/api/chat')) {
+      return baseUrl;
+    }
+    // 去除尾部斜杠，添加 /api/chat
+    return baseUrl.replace(/\/$/, '') + '/api/chat';
   }
 
   /**
