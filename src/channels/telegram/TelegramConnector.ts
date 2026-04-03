@@ -1,4 +1,5 @@
 import TelegramBot from 'node-telegram-bot-api';
+import * as https from 'https';
 import {
   ChannelConnector,
   ChannelConfig,
@@ -34,7 +35,27 @@ export class TelegramConnector implements ChannelConnector {
       return;
     }
 
-    this.bot = new TelegramBot(token, { polling: false });
+    // 检查代理设置
+    const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.ALL_PROXY || process.env.all_proxy;
+    
+    const botOptions: any = { polling: false };
+    
+    if (proxyUrl) {
+      console.log(`[TelegramConnector] Using proxy: ${proxyUrl}`);
+      // 使用代理服务器
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { HttpsProxyAgent } = require('https-proxy-agent');
+        botOptions.request = {
+          agent: new HttpsProxyAgent(proxyUrl),
+        };
+      } catch (err) {
+        console.warn('[TelegramConnector] https-proxy-agent not installed, proxy may not work');
+        console.warn('[TelegramConnector] Run: npm install https-proxy-agent');
+      }
+    }
+
+    this.bot = new TelegramBot(token, botOptions);
     console.log('[TelegramConnector] Initialized');
   }
 
