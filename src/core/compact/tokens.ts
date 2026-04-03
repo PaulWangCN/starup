@@ -38,9 +38,12 @@ export function estimateMessageTokens(message: ConversationMessage): number {
 }
 
 /**
- * 估算消息列表的 token 总数（保守填充 33%）
+ * 估算消息列表的 token 总数
+ * 注：移除了 33% 的保守填充，因为系统提示词本身已经很大，
+ * 过度估算会导致过早触发压缩
  */
 export function estimateMessagesTokens(messages: ConversationMessage[]): number {
   const raw = messages.reduce((sum, m) => sum + estimateMessageTokens(m), 0);
-  return Math.ceil(raw * (4 / 3));
+  // 仅保留 10% 的小缓冲，用于消息格式开销
+  return Math.ceil(raw * 1.1);
 }

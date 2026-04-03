@@ -12,7 +12,9 @@ import { compactConversation, adjustIndexToPreserveAPIInvariants } from './compa
 import { logger } from '../../utils/Logger';
 
 const MAX_OUTPUT_TOKENS_FOR_SUMMARY = 8_000;
-const AUTOCOMPACT_BUFFER_TOKENS = 13_000;
+// 调整：从 13k 降低到 5k，给系统提示词留更多空间
+// 原因：系统提示词本身就占 15k-20k tokens（AGENTS.md + SOUL.md + 工具定义等）
+const AUTOCOMPACT_BUFFER_TOKENS = 5_000;
 const MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3;
 
 // 模型上下文窗口映射（简化版）
@@ -71,6 +73,20 @@ function isAutoCompactEnabled(): boolean {
   return true;
 }
 
+/**
+ * 计算用户对话相关的 token 数（排除系统提示词）
+ * 系统提示词是固定的，不应该触发压缩
+ */
+function estimateConversationTokens(messages: ConversationMessage[]): number {
+  // 找到第一个非系统消息（通常是用户的第一条消息）
+  const firstUserIndex = messages.findIndex(m => m.role === 'user');
+  if (firstUserIndex === -1) return 0;
+  
+  // 只计算从第一个用户消息开始的历史
+  const conversationMessages = messages.slice(firstUserIndex);
+  return estimateMessagesTokens(conversationMessages);
+}
+
 function shouldAutoCompact(
   session: Session,
   messages: ConversationMessage[],
@@ -86,7 +102,8 @@ function shouldAutoCompact(
   if (!isAutoCompactEnabled()) return false;
 
   const threshold = getAutoCompactThreshold(model);
-  const tokens = estimateMessagesTokens(messages);
+  // 只计算对话历史，排除固定的系统提示词
+  const tokens = estimateConversationTokens(messages);
   return tokens >= threshold;
 }
 
