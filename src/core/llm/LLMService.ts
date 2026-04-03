@@ -218,6 +218,7 @@ export class LLMService {
         headers: {
           'Content-Type': 'application/json',
         },
+        timeout: parseInt(process.env.OLLAMA_TIMEOUT || '600000', 10),
       });
 
       return {
@@ -254,7 +255,7 @@ export class LLMService {
       },
     };
 
-    const TIMEOUT_MS = 120000;
+    const TIMEOUT_MS = parseInt(process.env.OLLAMA_TIMEOUT || '600000', 10);
 
     try {
       const response = await axios.post(url, payload, {
