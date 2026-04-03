@@ -87,8 +87,11 @@ export class LLMService {
         tool_calls: choice.message.tool_calls,
       };
     } catch (error: any) {
-      logger.error('LLMService', `DeepSeek API error: ${error.response?.data || error.message}`);
-      throw new Error(`DeepSeek API error: ${error.message}`);
+      const errorDetail = error.response?.data 
+        ? JSON.stringify(error.response.data, null, 2) 
+        : error.message;
+      logger.error('LLMService', `DeepSeek API error: ${errorDetail}`);
+      throw new Error(`DeepSeek API error: ${errorDetail}`);
     }
   }
 
@@ -118,8 +121,11 @@ export class LLMService {
         tool_calls: choice.message.tool_calls,
       };
     } catch (error: any) {
-      logger.error('LLMService', `OpenAI API error: ${error.response?.data || error.message}`);
-      throw new Error(`OpenAI API error: ${error.message}`);
+      const errorDetail = error.response?.data 
+        ? JSON.stringify(error.response.data, null, 2) 
+        : error.message;
+      logger.error('LLMService', `OpenAI API error: ${errorDetail}`);
+      throw new Error(`OpenAI API error: ${errorDetail}`);
     }
   }
 
@@ -295,8 +301,11 @@ export class LLMService {
         });
       });
     } catch (error: any) {
-      logger.error('LLMService', `Stream API error: ${error.response?.data || error.message}`);
-      throw new Error(`Stream API error: ${error.message}`);
+      const errorDetail = error.response?.data 
+        ? JSON.stringify(error.response.data, null, 2) 
+        : error.message;
+      logger.error('LLMService', `Stream API error: ${errorDetail}`);
+      throw new Error(`Stream API error: ${errorDetail}`);
     }
   }
 }
