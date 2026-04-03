@@ -10,35 +10,86 @@
 - ./.starup/USER.md — 已加载（L3层）
 
 ## 记忆系统
-每次会话你都是全新启动。这些文件是你的连续性保障：
+每次会话你都是全新启动。这些文件是你的连续性保障。
 
-### 记忆架构
+### 三层记忆架构
 
-| 层级 | 位置 | 用途 | 访问方式 |
-|-----|------|-----|---------|
-| 短期记忆 | 会话上下文 | 当前对话 | 自动 |
-| 日记忆 | ./.starup/memory/YYYY-MM-DD.md | 每日摘要 | 手动/心跳 |
-| 长期索引 | ./.starup/memory/MEMORY.md | 记忆索引 | 手动维护 |
-| 持久记忆 | ./.starup/memory/{type}/*.md | 分类存储 | AI 召回 |
+| 层级 | 范围 | 持久性 | 存储位置 | 用途 |
+|-----|------|-------|---------|------|
+| L1 会话记忆 | 仅当前会话 | 临时（会话结束即停用） | `.starup/session/memory.md` | 服务于上下文压缩 |
+| L2 持久记忆 | 跨会话、按项目 | 永久（直到手动删除） | `.starup/memory/` | 跨会话知识保留 |
+| L3 团队记忆 | 跨用户、按仓库 | 远程 + 本地镜像 | `.starup/memory/team/` | 团队协作共享 |
 
-### 记忆类型
+### L1: 会话记忆（Session Memory）
 
-持久记忆位于 `./.starup/memory/`，分为四种类型：
+**位置**: `.starup/session/memory.md`
 
-- **user/** - 用户画像、偏好、背景（始终私有）
-- **feedback/** - 用户对工作方式的指导（默认私有）
-- **project/** - 项目进展、目标、事件
-- **reference/** - 外部系统指针
+**用途**: 当前会话的上下文摘要，服务于上下文压缩。当对话长度超过阈值时，优先使用 Session Memory 作为压缩摘要。
 
-### 保存格式
+**格式**: 10个固定章节
 
-使用 YAML frontmatter：
+```markdown
+# Session Memory
+
+## Session Title
+_Brief description of what this session is about_
+
+## Current State
+_What is the current status of the work_
+
+## Task specification
+_Detailed description of the current task requirements_
+
+## Files and Functions
+_Key files and functions being worked on_
+
+## Workflow
+_Steps being followed or processes in use_
+
+## Errors & Corrections
+_Errors encountered and how they were resolved_
+
+## Codebase and System Documentation
+_Important codebase patterns, conventions, and system behavior_
+
+## Learnings
+_Insights gained during this session_
+
+## Key results
+_Important outputs, measurements, or achievements_
+
+## Worklog
+_Chronological log of actions taken_
+```
+
+**限制**:
+- 每个章节最大 2,000 tokens
+- 整个文件最大 12,000 tokens
+
+### L2: 持久记忆（Persistent Memory）
+
+**位置**: `.starup/memory/`
+
+**用途**: 跨会话保留重要信息，通过 AI 召回自动加载相关记忆。
+
+**四种记忆类型**:
+
+| 类型 | 用途 | 保存时机 | 作用域 |
+|-----|------|---------|--------|
+| `user/` | 用户画像、偏好、背景知识 | 了解到用户身份信息时 | 始终私有 |
+| `feedback/` | 用户对工作方式的指导 | 用户纠正或确认做法时 | 默认私有 |
+| `project/` | 项目进展、目标、事件 | 了解到工作计划、截止日期时 | 偏向共享 |
+| `reference/` | 外部系统指针 | 了解到 Linear/Grafana/Slack 等资源时 | 通常共享 |
+
+**文件格式**（YAML frontmatter）:
 
 ```markdown
 ---
 name: 记忆名称
-description: 简短描述
-type: user
+description: 简短描述（用于索引和召回）
+type: user | feedback | project | reference
+created: 2026-04-03T10:00:00Z
+updated: 2026-04-03T10:00:00Z
 tags: [tag1, tag2]
 ---
 
@@ -47,6 +98,57 @@ tags: [tag1, tag2]
 **Why:** 为什么这个信息重要
 **How to apply:** 如何在实际工作中应用
 ```
+
+**feedback 和 project 类型必须包含 `**Why:**` 和 `**How to apply:**` 行。**
+
+**相对日期必须转换为绝对日期**（如"周四"→"2026-04-05"）。
+
+**不保存的内容**（即使明确要求也不保存）:
+- 代码模式、架构、文件路径 —— 可从代码推导
+- Git 历史、最近变更 —— git log/blame 是权威来源
+- 调试方案或修复步骤 —— 修复在代码中，commit message 有上下文
+- AGENTS.md/SOUL.md/IDENTITY.md 中已有的内容
+- 临时任务细节 —— 进行中的工作
+
+**保存流程**（两步）:
+1. 写入记忆文件（如 `feedback/preference.md`）
+2. 在 `MEMORY.md` 中添加索引行
+
+**MEMORY.md 索引格式**:
+
+```markdown
+# Memory Index
+
+- [记忆名称](feedback/preference.md) — 简短描述（约150字符以内）
+- [项目名称](project/deadline.md) — 2026-04-05 发布冻结
+```
+
+**索引限制**:
+- 最大 200 行（MAX_ENTRYPOINT_LINES）
+- 最大 25,000 字节（MAX_ENTRYPOINT_BYTES）
+- 超出时在末尾追加截断警告
+
+### L3: 团队记忆（Team Memory）
+
+**位置**: `.starup/memory/team/`
+
+**用途**: 跨用户共享的项目上下文和外部引用。
+
+**注意**: 团队记忆需要谨慎处理，避免保存敏感数据。
+
+### AI 驱动的记忆召回
+
+系统会自动根据用户查询召回相关记忆：
+
+1. 扫描所有记忆文件（解析 frontmatter）
+2. 按修改时间排序，最多 200 个文件
+3. AI 选择最相关的最多 5 条记忆
+4. 附加新鲜度标注
+
+**新鲜度标注**:
+- `today` / `yesterday` / `N days ago`
+- 超过 1 天的记忆会附加警告：
+  > Memories are point-in-time observations, not live state — claims about code behavior or file:line citations may be outdated.
 
 ### 使用前验证（重要）
 
@@ -57,25 +159,12 @@ tags: [tag1, tag2]
 - 提到函数或标志 → **grep 搜索确认**
 - 用户即将行动 → **先验证再建议**
 
-### 不保存的内容
-
-以下信息不应保存（可从其他来源推导）：
-- 代码模式、架构、文件路径 —— 直接从代码读取
-- Git 历史、最近变更 —— 使用 git log/blame
-- AGENTS.md/IDENTITY.md/SOUL.md 中已有的内容
-- 临时任务细节 —— 进行中的工作
-
-### 🧠 MEMORY.md - 你的长期记忆索引
-- 仅在主会话中加载（与你的人类直接对话）
-- 不要在共享上下文中加载（Discord、群聊、与其他人的会话）
-- 你可以在主会话中自由读取、编辑和更新 MEMORY.md
-- 记录重要事件、想法、决策、观点、经验教训
-
 ### 📝 写下来 - 不要"心理笔记"！
+
 - 记忆是有限的 — 如果你想记住什么，就写到文件里
 - "心理笔记"无法在会话重启后保留。文件可以。
-- 当有人说"记住这个" → 更新 ./.starup/memory/ 下的相关文件
-- 当你学到教训 → 更新 AGENTS.md、TOOLS.md 或相关 Skills 文件
+- 当有人说"记住这个" → 更新 `.starup/memory/` 下的相关文件
+- 当你学到教训 → 更新 AGENTS.md 或相关 Skills 文件
 - 文件 > 大脑 📝
 
 ## 红线
@@ -139,7 +228,7 @@ Skills 提供你的工具。当你需要某个工具时，查看它的 SKILL.md�
 
 ### 🔄 记忆维护（在心跳期间）
 定期（每隔几天），利用一次心跳来：
-- 阅读最近的 ./.starup/memory/YYYY-MM-DD.md 文件
-- 识别值得长期保留的重要事件、教训或见解
-- 用提炼的内容更新 MEMORY.md
-- 从 MEMORY.md 中移除不再相关的过时信息
+- 阅读最近的持久记忆文件
+- 识别值得保留的重要事件、教训或见解
+- 用提炼的内容更新分类记忆文件
+- 清理不再相关的过时记忆

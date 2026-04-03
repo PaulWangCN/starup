@@ -5,26 +5,46 @@ import { LLMService } from '../llm/LLMService';
 import { logger } from '../../utils/Logger';
 
 /**
- * 记忆管理器 v2
+ * 记忆管理器 v3 - Claude Code 三层记忆架构实现
  * 
- * 核心改进：
+ * 架构：
+ * L1 Session Memory: .starup/session/memory.md - 10章节固定格式，服务于上下文压缩
+ * L2 Persistent Memory: .starup/memory/{type}/*.md - 4种类型，AI召回
+ * L3 Team Memory: .starup/memory/team/*.md - 团队协作（暂忽略）
+ * 
+ * 核心特性：
  * 1. AI 驱动的记忆召回（替代关键词匹配）
  * 2. 记忆新鲜度标注（防止过期幻觉）
- * 3. 支持 frontmatter 格式（Claude Code 风格）
- * 4. 使用前验证提示
+ * 3. YAML frontmatter 格式支持
+ * 4. MEMORY.md 索引管理（200行/25KB限制）
+ * 5. 两步保存流程（先写文件，再更新索引）
  */
 export class MemoryManager {
   private memoryDir: string;
+  private sessionDir: string;
+  private logsDir: string;
   private longTermIndex: string = 'MEMORY.md';
   private llmService?: LLMService;
 
-  // 配置
-  private readonly MAX_RELEVANT_MEMORIES = 5;      // 最多召回 5 条
-  private readonly MAX_MEMORY_AGE_DAYS = 90;       // 90 天前的记忆视为过期
-  private readonly FRESHNESS_WARNING_DAYS = 1;     // 超过 1 天添加警告
+  // 索引限制
+  private readonly MAX_ENTRYPOINT_LINES = 200;
+  private readonly MAX_ENTRYPOINT_BYTES = 25000;
+  
+  // 召回限制
+  private readonly MAX_RELEVANT_MEMORIES = 5;
+  private readonly MAX_SCAN_FILES = 200;
+  private readonly FRESHNESS_WARNING_DAYS = 1;
+  private readonly MAX_MEMORY_AGE_DAYS = 90;
+
+  // Session Memory 限制
+  private readonly MAX_SECTION_LENGTH = 2000;
+  private readonly MAX_TOTAL_SESSION_MEMORY_TOKENS = 12000;
 
   constructor(llmService?: LLMService) {
-    this.memoryDir = path.join(process.cwd(), '.starup', 'memory');
+    const baseDir = path.join(process.cwd(), '.starup');
+    this.memoryDir = path.join(baseDir, 'memory');
+    this.sessionDir = path.join(baseDir, 'session');
+    this.logsDir = path.join(baseDir, 'logs');
     this.llmService = llmService;
     this.ensureDirectories();
   }
@@ -40,35 +60,121 @@ export class MemoryManager {
    * 确保目录结构存在
    */
   async ensureDirectories(): Promise<void> {
-    try {
-      await fs.mkdir(this.memoryDir, { recursive: true });
-    } catch (error) {
-      logger.error('MemoryManager', `Failed to create memory directory: ${error}`);
+    const dirs = [
+      this.memoryDir,
+      this.sessionDir,
+      this.logsDir,
+      path.join(this.memoryDir, 'user'),
+      path.join(this.memoryDir, 'feedback'),
+      path.join(this.memoryDir, 'project'),
+      path.join(this.memoryDir, 'reference'),
+      path.join(this.memoryDir, 'team'),
+    ];
+
+    for (const dir of dirs) {
+      try {
+        await fs.mkdir(dir, { recursive: true });
+      } catch (error) {
+        logger.error('MemoryManager', `Failed to create directory ${dir}: ${error}`);
+      }
     }
   }
 
-  // ==================== 文件路径方法 ====================
+  // ==================== Session Memory (L1) ====================
 
   /**
-   * 获取日记忆文件路径
+   * 获取 Session Memory 路径
    */
-  getDailyLogPath(date?: string): string {
-    const dateStr = date || new Date().toISOString().split('T')[0];
-    return path.join(this.memoryDir, `${dateStr}.md`);
+  getSessionMemoryPath(): string {
+    return path.join(this.sessionDir, 'memory.md');
   }
 
   /**
-   * 获取长期记忆索引路径
+   * 读取 Session Memory
    */
-  getLongTermIndexPath(): string {
-    return path.join(this.memoryDir, this.longTermIndex);
+  async readSessionMemory(): Promise<string> {
+    try {
+      return await fs.readFile(this.getSessionMemoryPath(), 'utf-8');
+    } catch (error) {
+      // 返回模板
+      return this.getSessionMemoryTemplate();
+    }
   }
 
   /**
-   * 获取特定类型的记忆目录
+   * 写入 Session Memory
    */
-  getTypedMemoryDir(type: MemoryType): string {
-    return path.join(this.memoryDir, type);
+  async writeSessionMemory(content: string): Promise<void> {
+    await fs.writeFile(this.getSessionMemoryPath(), content, 'utf-8');
+  }
+
+  /**
+   * Session Memory 模板（10个固定章节）
+   */
+  getSessionMemoryTemplate(): string {
+    return `# Session Memory
+
+## Session Title
+_Brief description of what this session is about_
+
+## Current State
+_What is the current status of the work_
+
+## Task specification
+_Detailed description of the current task requirements_
+
+## Files and Functions
+_Key files and functions being worked on_
+
+## Workflow
+_Steps being followed or processes in use_
+
+## Errors & Corrections
+_Errors encountered and how they were resolved_
+
+## Codebase and System Documentation
+_Important codebase patterns, conventions, and system behavior_
+
+## Learnings
+_Insights gained during this session_
+
+## Key results
+_Important outputs, measurements, or achievements_
+
+## Worklog
+_Chronological log of actions taken_
+`;
+  }
+
+  // ==================== 日志文件（KAIROS 模式） ====================
+
+  /**
+   * 获取日志文件路径（按日期组织：logs/YYYY/MM/YYYY-MM-DD.md）
+   */
+  getLogPath(date?: Date): string {
+    const d = date || new Date();
+    const year = d.getFullYear().toString();
+    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, '0');
+    
+    return path.join(this.logsDir, year, month, `${year}-${month}-${day}.md`);
+  }
+
+  /**
+   * 追加日志条目（KAIROS 模式 - 只追加不编辑）
+   */
+  async appendLog(entry: string, date?: Date): Promise<void> {
+    const logPath = this.getLogPath(date);
+    const logDir = path.dirname(logPath);
+    
+    try {
+      await fs.mkdir(logDir, { recursive: true });
+      const timestamp = new Date().toISOString();
+      const content = `\n## ${timestamp}\n${entry}\n`;
+      await fs.appendFile(logPath, content, 'utf-8');
+    } catch (error) {
+      logger.error('MemoryManager', `Failed to append log: ${error}`);
+    }
   }
 
   // ==================== Frontmatter 解析 ====================
@@ -105,7 +211,7 @@ export class MemoryManager {
         
         if (key === 'tags') {
           // 解析数组格式: [tag1, tag2] 或单行格式
-          const cleanValue = value.replace(/^\[|\]$/g, '');  // 去掉首尾方括号
+          const cleanValue = value.replace(/^\[|\]$/g, '');
           frontmatter.tags = cleanValue.split(',').map(t => t.trim()).filter(t => t);
         } else {
           (frontmatter as any)[key] = value;
@@ -145,7 +251,7 @@ export class MemoryManager {
     return lines.join('\n');
   }
 
-  // ==================== 记忆读写 ====================
+  // ==================== 持久记忆读写（L2） ====================
 
   /**
    * 读取记忆文件（带 frontmatter 解析）
@@ -158,7 +264,6 @@ export class MemoryManager {
 
       // 如果没有 frontmatter，尝试兼容旧格式
       if (!frontmatter) {
-        // 从文件名和第一行推断
         const filename = path.basename(filePath, '.md');
         const firstLine = content.split('\n')[0]?.replace(/^#\s*/, '') || filename;
         
@@ -187,6 +292,10 @@ export class MemoryManager {
 
   /**
    * 写入记忆文件（带 frontmatter）
+   * 
+   * 两步保存流程：
+   * 1. 写入记忆文件
+   * 2. 更新 MEMORY.md 索引
    */
   async writeMemoryFile(
     filename: string,
@@ -194,7 +303,7 @@ export class MemoryManager {
     content: string,
     type?: MemoryType
   ): Promise<void> {
-    const dir = type ? this.getTypedMemoryDir(type) : this.memoryDir;
+    const dir = type ? path.join(this.memoryDir, type) : this.memoryDir;
     await fs.mkdir(dir, { recursive: true });
 
     const filePath = path.join(dir, filename);
@@ -207,44 +316,158 @@ export class MemoryManager {
   }
 
   /**
+   * 删除记忆文件
+   */
+  async deleteMemoryFile(filename: string, type?: MemoryType): Promise<void> {
+    const dir = type ? path.join(this.memoryDir, type) : this.memoryDir;
+    const filePath = path.join(dir, filename);
+    
+    try {
+      await fs.unlink(filePath);
+      await this.removeFromIndex(filename, type);
+    } catch (error) {
+      logger.error('MemoryManager', `Failed to delete memory file: ${error}`);
+    }
+  }
+
+  // ==================== MEMORY.md 索引管理 ====================
+
+  /**
+   * 获取索引文件路径
+   */
+  getIndexPath(): string {
+    return path.join(this.memoryDir, this.longTermIndex);
+  }
+
+  /**
    * 更新 MEMORY.md 索引
+   * 
+   * 格式：- [记忆名称](path/to/file.md) — 简短描述（约150字符以内）
+   * 限制：
+   * - 最大 200 行（MAX_ENTRYPOINT_LINES）
+   * - 最大 25,000 字节（MAX_ENTRYPOINT_BYTES）
+   * - 超出时在末尾追加截断警告
    */
   private async updateMemoryIndex(
     frontmatter: MemoryFrontmatter,
     filename: string,
     type?: MemoryType
   ): Promise<void> {
-    const indexPath = this.getLongTermIndexPath();
+    const indexPath = this.getIndexPath();
     let indexContent = '';
     
     try {
       indexContent = await fs.readFile(indexPath, 'utf-8');
     } catch {
       // 文件不存在，创建新索引
-      indexContent = '# Memory Index\n\nThis file indexes all persistent memories.\n\n';
+      indexContent = '# Memory Index\n\nThis file indexes all persistent memories.\n';
+      for (const t of ['user', 'feedback', 'project', 'reference']) {
+        indexContent += `\n## ${t}\n`;
+      }
     }
 
-    // 检查是否已存在
+    // 构建相对路径
     const relativePath = type ? `${type}/${filename}` : filename;
     const entryPattern = new RegExp(`- \\[[^\\]]+\\]\\(${relativePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)`);
     
+    // 截断描述到约150字符
+    const truncatedDesc = frontmatter.description.length > 150 
+      ? frontmatter.description.substring(0, 147) + '...'
+      : frontmatter.description;
+    
+    const newEntry = `- [${frontmatter.name}](${relativePath}) — ${truncatedDesc}`;
+
     if (entryPattern.test(indexContent)) {
       // 更新现有条目
       const lines = indexContent.split('\n');
       const newLines = lines.map(line => {
         if (entryPattern.test(line)) {
-          return `- [${frontmatter.name}](${relativePath}) — ${frontmatter.description}`;
+          return newEntry;
         }
         return line;
       });
       indexContent = newLines.join('\n');
     } else {
-      // 添加新条目
-      const newEntry = `- [${frontmatter.name}](${relativePath}) — ${frontmatter.description}`;
-      indexContent += `${newEntry}\n`;
+      // 在对应类型章节下添加新条目
+      const typeSection = type || 'reference';
+      const sectionPattern = new RegExp(`(## ${typeSection}\\n)`);
+      
+      if (sectionPattern.test(indexContent)) {
+        indexContent = indexContent.replace(sectionPattern, `$1${newEntry}\n`);
+      } else {
+        indexContent += `\n## ${typeSection}\n${newEntry}\n`;
+      }
     }
 
+    // 应用索引限制
+    indexContent = this.enforceIndexLimits(indexContent);
+
     await fs.writeFile(indexPath, indexContent, 'utf-8');
+  }
+
+  /**
+   * 从索引中移除条目
+   */
+  private async removeFromIndex(filename: string, type?: MemoryType): Promise<void> {
+    const indexPath = this.getIndexPath();
+    
+    try {
+      let indexContent = await fs.readFile(indexPath, 'utf-8');
+      const relativePath = type ? `${type}/${filename}` : filename;
+      const entryPattern = new RegExp(`- \\[[^\\]]+\\]\\(${relativePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\).*\\n`);
+      
+      indexContent = indexContent.replace(entryPattern, '');
+      await fs.writeFile(indexPath, indexContent, 'utf-8');
+    } catch (error) {
+      logger.error('MemoryManager', `Failed to remove from index: ${error}`);
+    }
+  }
+
+  /**
+   * 强制执行索引限制
+   */
+  private enforceIndexLimits(content: string): string {
+    const buffer = Buffer.from(content, 'utf-8');
+    
+    // 检查字节限制
+    if (buffer.length > this.MAX_ENTRYPOINT_BYTES) {
+      const lines = content.split('\n');
+      let currentBytes = 0;
+      const truncatedLines: string[] = [];
+      
+      for (const line of lines) {
+        const lineBytes = Buffer.byteLength(line + '\n', 'utf-8');
+        if (currentBytes + lineBytes > this.MAX_ENTRYPOINT_BYTES - 200) {
+          break;
+        }
+        truncatedLines.push(line);
+        currentBytes += lineBytes;
+      }
+      
+      content = truncatedLines.join('\n');
+      content += '\n\n> ⚠️ **Index Truncated**: Maximum size limit reached. Some older entries may not be displayed.\n';
+    }
+    
+    // 检查行数限制
+    const lines = content.split('\n');
+    if (lines.length > this.MAX_ENTRYPOINT_LINES) {
+      const truncated = lines.slice(0, this.MAX_ENTRYPOINT_LINES - 3);
+      content = truncated.join('\n');
+      content += '\n\n> ⚠️ **Index Truncated**: Maximum line limit reached. Some older entries may not be displayed.\n';
+    }
+    
+    return content;
+  }
+
+  /**
+   * 读取索引
+   */
+  async readIndex(): Promise<string> {
+    try {
+      return await fs.readFile(this.getIndexPath(), 'utf-8');
+    } catch (error) {
+      return '# Memory Index\n\nNo memories indexed yet.\n';
+    }
   }
 
   // ==================== 扫描与召回 ====================
@@ -254,20 +477,19 @@ export class MemoryManager {
    */
   async scanMemoryFiles(): Promise<ParsedMemory[]> {
     const memories: ParsedMemory[] = [];
-    const maxFiles = 200;  // 最多扫描 200 个文件
 
     // 递归扫描目录
-    const scanDir = async (dir: string, baseDir: string = dir) => {
+    const scanDir = async (dir: string) => {
       try {
         const entries = await fs.readdir(dir, { withFileTypes: true });
         
         for (const entry of entries) {
-          if (memories.length >= maxFiles) break;
+          if (memories.length >= this.MAX_SCAN_FILES) break;
           
           const fullPath = path.join(dir, entry.name);
           
-          if (entry.isDirectory()) {
-            await scanDir(fullPath, baseDir);
+          if (entry.isDirectory() && entry.name !== 'team') {
+            await scanDir(fullPath);
           } else if (entry.name.endsWith('.md') && entry.name !== this.longTermIndex) {
             const memory = await this.readMemoryFile(fullPath);
             if (memory) {
@@ -285,7 +507,7 @@ export class MemoryManager {
     // 按修改时间降序排序
     memories.sort((a, b) => b.mtime - a.mtime);
     
-    return memories.slice(0, maxFiles);
+    return memories.slice(0, this.MAX_SCAN_FILES);
   }
 
   /**
@@ -301,14 +523,21 @@ export class MemoryManager {
       return [];
     }
 
+    // 过滤掉过旧的记忆（90天）
+    const now = Date.now();
+    const validMemories = allMemories.filter(m => {
+      const age = (now - m.mtime) / (1000 * 60 * 60 * 24);
+      return age <= this.MAX_MEMORY_AGE_DAYS;
+    });
+
     // 如果没有 LLM 服务，回退到简单匹配
     if (!this.llmService) {
-      return this.fallbackKeywordSearch(query, allMemories);
+      return this.fallbackKeywordSearch(query, validMemories);
     }
 
     try {
       // 2. 构建选择提示
-      const selectionPrompt = this.buildMemorySelectionPrompt(query, allMemories, recentTools);
+      const selectionPrompt = this.buildMemorySelectionPrompt(query, validMemories, recentTools);
       
       // 3. 调用 LLM 选择
       const response = await this.llmService.chat(
@@ -326,7 +555,11 @@ export class MemoryManager {
       // 5. 构建结果
       const results: RelevantMemory[] = [];
       for (const { path: memoryPath, reason } of selectedPaths) {
-        const memory = allMemories.find(m => m.path === memoryPath || m.path.endsWith(memoryPath));
+        const memory = validMemories.find(m => 
+          m.path === memoryPath || 
+          m.path.endsWith(memoryPath) ||
+          path.relative(this.memoryDir, m.path) === memoryPath
+        );
         if (memory) {
           results.push({
             memory,
@@ -339,7 +572,7 @@ export class MemoryManager {
       return results.slice(0, this.MAX_RELEVANT_MEMORIES);
     } catch (error) {
       logger.error('MemoryManager', `AI selection failed, falling back: ${error}`);
-      return this.fallbackKeywordSearch(query, allMemories);
+      return this.fallbackKeywordSearch(query, validMemories);
     }
   }
 
@@ -460,6 +693,8 @@ selected_files: none`;
 
   /**
    * 获取新鲜度文本
+   * 
+   * 使用相对时间（X days ago）比 ISO 时间戳更能触发模型的过期推理
    */
   getFreshnessText(mtimeMs: number): string {
     const days = this.memoryAgeDays(mtimeMs);
@@ -481,7 +716,7 @@ selected_files: none`;
       return '';  // 新鲜记忆不加警告
     }
 
-    return `\n\n⚠️ **Memory Freshness Warning**\nThis memory is from ${days} days ago. Memories are point-in-time observations, not live state — claims about code behavior or file citations may be outdated. Verify against current code before asserting as fact.`;
+    return `\n\n⚠️ **Memory Freshness Warning**\nThis memory is from ${days} days ago.\nMemories are point-in-time observations, not live state — claims about code behavior or file:line citations may be outdated. Verify against current code before asserting as fact.`;
   }
 
   /**
@@ -492,88 +727,14 @@ selected_files: none`;
     return `## ${memory.frontmatter.name}\n**Type:** ${memory.frontmatter.type} | **Updated:** ${this.getFreshnessText(memory.mtime)}\n\n${memory.content}${freshness}`;
   }
 
-  // ==================== 记忆注入（兼容旧接口） ====================
+  // ==================== 记忆注入 ====================
 
   /**
-   * 获取相关记忆并注入上下文（兼容旧接口）
+   * 获取相关记忆并注入上下文
    */
   async injectRelevantMemories(context: string, _session?: any): Promise<string[]> {
     const relevant = await this.findRelevantMemories(context);
     return relevant.map(r => this.formatMemoryContent(r.memory));
-  }
-
-  // ==================== 传统方法（向后兼容） ====================
-
-  /**
-   * 读取日记忆（兼容旧格式）
-   */
-  async readDailyLog(date?: string): Promise<string> {
-    const filePath = date 
-      ? path.join(this.memoryDir, `${date}.md`)
-      : this.getDailyLogPath();
-    
-    try {
-      return await fs.readFile(filePath, 'utf-8');
-    } catch (error) {
-      return '';
-    }
-  }
-
-  /**
-   * 写入日记忆（兼容旧格式）
-   */
-  async writeDailyLog(entry: MemoryEntry): Promise<void> {
-    const filePath = this.getDailyLogPath();
-    const content = await this.readDailyLog();
-    
-    const entryText = `
-## ${entry.topic}
-${entry.summary}
-
-_Importance: ${entry.importance}/10 | Time: ${new Date(entry.timestamp).toLocaleString()}_
-
----
-`;
-
-    const newContent = content + entryText;
-    await fs.writeFile(filePath, newContent, 'utf-8');
-  }
-
-  /**
-   * 读取长期记忆索引
-   */
-  async readLongTermMemory(): Promise<string> {
-    try {
-      return await fs.readFile(this.getLongTermIndexPath(), 'utf-8');
-    } catch (error) {
-      return '';
-    }
-  }
-
-  /**
-   * 获取最近 N 天的日记忆
-   */
-  async getRecentDailyLogs(days: number): Promise<string[]> {
-    const logs: string[] = [];
-    const now = new Date();
-    
-    for (let i = 0; i < days; i++) {
-      const date = new Date(now);
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
-      
-      try {
-        const log = await fs.readFile(
-          path.join(this.memoryDir, `${dateStr}.md`), 
-          'utf-8'
-        );
-        logs.push(log);
-      } catch (error) {
-        // 忽略不存在的文件
-      }
-    }
-    
-    return logs;
   }
 
   // ==================== 私有方法 ====================
@@ -589,5 +750,5 @@ _Importance: ${entry.importance}/10 | Time: ${new Date(entry.timestamp).toLocale
   }
 }
 
-// 单例导出（向后兼容）
+// 单例导出
 export const memoryManager = new MemoryManager();
