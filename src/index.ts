@@ -343,8 +343,9 @@ export class StarUpCore {
       session.context.compressed = true;
       session.context.lastCompactAt = Date.now();
       session.context.compactCount = (session.context.compactCount ?? 0) + 1;
+      const modeInfo = initialCompact.mode ? ` (${initialCompact.mode})` : '';
       console.log(
-        `[StarUpCore] Auto-compacted via ${initialCompact.method}, tokens: ${initialCompact.tokensBefore} -> ${initialCompact.tokensAfter}`
+        `[StarUpCore] Auto-compacted via ${initialCompact.method}${modeInfo}, tokens: ${initialCompact.tokensBefore} -> ${initialCompact.tokensAfter}`
       );
     }
 
@@ -371,8 +372,9 @@ export class StarUpCore {
         session.context.compressed = true;
         session.context.lastCompactAt = Date.now();
         session.context.compactCount = (session.context.compactCount ?? 0) + 1;
+        const modeInfo = iterCompact.mode ? ` (${iterCompact.mode})` : '';
         console.log(
-          `[StarUpCore] Auto-compacted via ${iterCompact.method}, tokens: ${iterCompact.tokensBefore} -> ${iterCompact.tokensAfter}`
+          `[StarUpCore] Auto-compacted via ${iterCompact.method}${modeInfo}, tokens: ${iterCompact.tokensBefore} -> ${iterCompact.tokensAfter}`
         );
       }
 

@@ -218,6 +218,7 @@ export async function autoCompactIfNeeded(
   tokensBefore?: number;
   tokensAfter?: number;
   method?: 'session_memory' | 'full_compact';
+  mode?: 'detailed' | 'quick';
 }> {
   if (process.env.DISABLE_COMPACT === '1' || process.env.DISABLE_COMPACT === 'true') {
     return { wasCompacted: false };
@@ -246,7 +247,14 @@ export async function autoCompactIfNeeded(
   }
 
   // 2. 回退到传统压缩
-  const fullResult = await compactConversation(session, messages, llmService, sessionManager);
+  const fullResult = await compactConversation(session, messages, llmService, sessionManager, {
+    onAnalysis: (analysis) => {
+      logger.debug('AutoCompact', 
+        `Complexity analysis: messages=${analysis.messageCount}, files=${analysis.fileCount}, ` +
+        `errors=${analysis.hasErrors}, code=${analysis.hasCodeBlocks}, level=${analysis.complexity}`
+      );
+    },
+  });
   if (fullResult.success && fullResult.newMessages) {
     tracking.consecutiveFailures = 0;
     return {
@@ -255,6 +263,7 @@ export async function autoCompactIfNeeded(
       tokensBefore: fullResult.tokensBefore,
       tokensAfter: fullResult.tokensAfter,
       method: 'full_compact',
+      mode: fullResult.mode,
     };
   }
 

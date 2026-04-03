@@ -8,7 +8,12 @@ import { SessionManager } from '../session/SessionManager';
 import { LLMService } from '../llm/LLMService';
 import { estimateMessagesTokens, roughTokenCountEstimation } from './tokens';
 import { groupMessagesByApiRound } from './grouping';
-import { BASE_COMPACT_PROMPT, formatCompactSummary, getCompactUserSummaryMessage } from './prompt';
+import { 
+  selectCompactPrompt, 
+  formatCompactSummary, 
+  getCompactUserSummaryMessage,
+  ComplexityAnalysis 
+} from './prompt';
 import { calculateMessagesToKeepIndex } from './autoCompact';
 
 const MAX_OUTPUT_TOKENS_FOR_SUMMARY = 8_000;
@@ -149,19 +154,30 @@ export async function compactConversation(
   session: Session,
   messages: ConversationMessage[],
   llmService: LLMService,
-  sessionManager: SessionManager
+  sessionManager: SessionManager,
+  options?: {
+    forceMode?: 'detailed' | 'quick';
+    onAnalysis?: (analysis: ComplexityAnalysis) => void;
+  }
 ): Promise<{
   success: boolean;
   newMessages?: ConversationMessage[];
   summary?: string;
   tokensBefore?: number;
   tokensAfter?: number;
+  mode?: 'detailed' | 'quick';
 }> {
   let normalized = normalizeMessagesForAPI(stripImagesFromMessages(messages));
 
+  // 动态选择压缩策略
+  const { prompt: selectedPrompt, mode, analysis } = selectCompactPrompt(normalized, options?.forceMode);
+  
+  // 通知调用方分析结果（用于日志记录）
+  options?.onAnalysis?.(analysis);
+
   for (let retry = 0; retry <= MAX_PTL_RETRIES; retry++) {
     const historyText = formatMessagesForCompact(normalized);
-    const task = `${BASE_COMPACT_PROMPT}\n\nHere is the conversation history:\n${historyText}`;
+    const task = `${selectedPrompt}\n\nHere is the conversation history:\n${historyText}`;
 
     const forkSession = sessionManager.spawnSubAgent(session.id, {
       task,
@@ -201,6 +217,7 @@ export async function compactConversation(
         summary,
         tokensBefore,
         tokensAfter,
+        mode,
       };
     } catch (error: any) {
       const errMsg = String(error.message || error);

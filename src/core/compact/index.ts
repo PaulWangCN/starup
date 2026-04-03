@@ -16,6 +16,11 @@ export {
   getCompactUserSummaryMessage,
   BASE_COMPACT_PROMPT,
   NO_TOOLS_PREAMBLE,
+  DETAILED_COMPACT_PROMPT,
+  QUICK_COMPACT_PROMPT,
+  selectCompactPrompt,
+  analyzeComplexity,
+  type ComplexityAnalysis,
 } from './prompt';
 
 export { applyMicroCompact } from './microCompact';
