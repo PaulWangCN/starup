@@ -240,41 +240,24 @@ export class PromptAssembler {
 
   /**
    * L5: Skills 层
-   * 包含两部分：
-   * 1. 内置 skills（直接嵌入，系统核心能力）
-   * 2. 用户安装的 skills（从索引文件读取）
+   * 从 skills_index.md 读取已安装 skills 的精简索引
    */
   private async loadLayer5(): Promise<string> {
-    const lines: string[] = ['# Skills 能力层', ''];
-
-    // 1. 内置 skills（从 SkillRegistry 获取）
-    const builtinDescription = this.skillRegistry.getBuiltinSkillsDescription();
-    if (builtinDescription) {
-      lines.push('## 系统内置 Skills（立即可用）');
-      lines.push('');
-      lines.push(builtinDescription);
-      lines.push('');
-    }
-
-    // 2. 用户安装的 skills（从索引文件读取）
     const indexPath = path.join(process.cwd(), '.starup', 'skills_index.md');
+    let content: string;
+    
     try {
-      let userContent = await fs.readFile(indexPath, 'utf-8');
+      content = await fs.readFile(indexPath, 'utf-8');
       // 防止过长导致上下文膨胀
       const maxChars = 4000;
-      if (userContent.length > maxChars) {
-        userContent = userContent.substring(0, maxChars) + '\n\n_...（更多 skill 请使用 /skills 查看）_';
+      if (content.length > maxChars) {
+        content = content.substring(0, maxChars) + '\n\n_...（更多 skill 请使用 /skills 查看）_';
       }
-      lines.push('---');
-      lines.push('');
-      lines.push(userContent);
     } catch {
-      lines.push('---');
-      lines.push('');
-      lines.push('_当前没有用户安装的 skills。需要时可用 clawhub skill 搜索安装。_');
+      content = '_当前没有安装的 skills。需要时可用 clawhub skill 搜索安装。_';
     }
 
-    return this.wrapLayer('SKILLS', lines.join('\n'));
+    return this.wrapLayer('SKILLS', '# Skills 能力层\n\n' + content);
   }
 
   private generateLayer6(context: RuntimeContext): string {

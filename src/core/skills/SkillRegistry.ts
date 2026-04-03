@@ -65,7 +65,8 @@ export class SkillRegistry {
   }
 
   /**
-   * 获取内置 skills 的完整描述（用于系统提示词）
+   * 获取内置 skills 的精简描述（用于系统提示词）
+   * 只返回名称和描述，不返回完整 skill 内容，避免提示词膨胀
    */
   getBuiltinSkillsDescription(): string {
     // 现在所有 skills 都在同一个目录，不再需要区分内置和用户
@@ -73,16 +74,9 @@ export class SkillRegistry {
       return '';
     }
 
-    const lines: string[] = ['## 已安装 Skills', ''];
+    const lines: string[] = ['## 可使用以下Skills帮助用户完成任务：', ''];
     for (const [id, skill] of this.userSkills) {
-      lines.push(`### ${skill.metadata.name}`);
-      lines.push(`- **ID**: ${id}`);
-      lines.push(`- **描述**: ${skill.metadata.description}`);
-      if (skill.content) {
-        lines.push('');
-        lines.push(skill.content);
-      }
-      lines.push('');
+      lines.push(`- **${skill.metadata.name}**: ${skill.metadata.description}`);
     }
     return lines.join('\n');
   }
@@ -227,7 +221,7 @@ export class SkillRegistry {
    */
   private async writeSkillsIndex(): Promise<void> {
     const lines: string[] = [
-      '# 已安装 Skills',
+      '# 可使用以下Skills帮助用户完成任务：',
       '',
     ];
 
@@ -240,11 +234,9 @@ export class SkillRegistry {
         if ('manifest' in item) {
           const pkg = item as SkillPackage;
           lines.push(`- **${pkg.manifest.name}**: ${pkg.manifest.description}`);
-          lines.push(`  - 路径: ${pkg.path}`);
         } else {
           const skill = item as Skill;
           lines.push(`- **${skill.metadata.name}**: ${skill.metadata.description}`);
-          lines.push(`  - 路径: ${skill.path}`);
         }
       }
     }
