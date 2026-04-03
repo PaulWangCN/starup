@@ -61,14 +61,20 @@ export class StarUpCore {
     this.scheduler = taskScheduler;
 
     const llmProvider = (process.env.LLM_PROVIDER as any) || 'deepseek';
-    const llmModel = process.env.LLM_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+    
+    // Ollama 使用本地默认配置
+    const isOllama = llmProvider === 'ollama';
+    const defaultModel = isOllama ? 'llama3.2' : 'deepseek-chat';
+    const defaultBaseUrl = isOllama ? 'http://localhost:11434/api/chat' : undefined;
+    
+    const llmModel = process.env.LLM_MODEL || process.env.OLLAMA_MODEL || defaultModel;
 
     this.config = {
       llm: {
         provider: llmProvider,
-        apiKey: process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY || '',
+        apiKey: process.env.LLM_API_KEY || '',
         model: llmModel,
-        baseUrl: process.env.LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL,
+        baseUrl: process.env.LLM_BASE_URL || process.env.OLLAMA_BASE_URL || defaultBaseUrl,
         temperature: parseFloat(process.env.LLM_TEMPERATURE || '0.7'),
         maxTokens: parseInt(process.env.LLM_MAX_TOKENS || '8192', 10),
       },
@@ -80,7 +86,8 @@ export class StarUpCore {
       ...config,
     } as SystemConfig;
 
-    if (this.config.llm.apiKey) {
+    // 创建 LLM 服务（Ollama 不需要 API Key）
+    if (this.config.llm.apiKey || this.config.llm.provider === 'ollama') {
       this.llmService = new LLMService(this.config.llm);
     }
   }
@@ -242,15 +249,23 @@ export class StarUpCore {
    * 校验环境变量配置
    */
   private validateConfig(): void {
-    if (!this.config.llm.apiKey) {
-      logger.warn('StarUpCore', '⚠️ LLM_API_KEY / DEEPSEEK_API_KEY 未设置，AI 功能将被禁用');
+    const provider = this.config.llm.provider;
+    const supportedProviders = ['deepseek', 'openai', 'ollama'];
+    
+    if (!supportedProviders.includes(provider)) {
+      logger.warn('StarUpCore', `⚠️ 未知的 LLM 提供商: ${provider}，支持的提供商: ${supportedProviders.join(', ')}`);
+      return;
+    }
+    
+    // Ollama 不需要 API Key
+    if (provider !== 'ollama' && !this.config.llm.apiKey) {
+      logger.warn('StarUpCore', `⚠️ LLM_API_KEY 未设置，AI 功能将被禁用`);
       logger.info('StarUpCore', '💡 提示: 复制 .env.example 为 .env 并填入 API Key');
     }
     
-    const provider = this.config.llm.provider;
-    const supportedProviders = ['deepseek', 'openai'];
-    if (!supportedProviders.includes(provider)) {
-      logger.warn('StarUpCore', `⚠️ 未知的 LLM 提供商: ${provider}，支持的提供商: ${supportedProviders.join(', ')}`);
+    if (provider === 'ollama') {
+      logger.info('StarUpCore', `🦙 使用 Ollama 本地模型: ${this.config.llm.model}`);
+      logger.info('StarUpCore', `   地址: ${this.config.llm.baseUrl}`);
     }
   }
 

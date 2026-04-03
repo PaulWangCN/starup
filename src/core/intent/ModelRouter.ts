@@ -326,7 +326,8 @@ export class ModelRouter {
    * 获取默认配置
    */
   private getDefaultConfig(): ModelRoutingConfig {
-    const defaultModel = process.env.LLM_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+    const isOllama = process.env.LLM_PROVIDER === 'ollama';
+    const defaultModel = process.env.LLM_MODEL || process.env.OLLAMA_MODEL || (isOllama ? 'llama3.2' : 'deepseek-chat');
     const codeModel = process.env.LLM_MODEL_CODE || defaultModel;
 
     return {

@@ -36,6 +36,8 @@ export class LLMService {
         return this.callDeepSeek(messages, tools, options);
       case 'openai':
         return this.callOpenAI(messages, tools, options);
+      case 'ollama':
+        return this.callOllama(messages, tools, options);
       default:
         throw new Error(`Unsupported provider: ${this.config.provider}`);
     }
@@ -56,6 +58,8 @@ export class LLMService {
         return this.callDeepSeekStream(messages, tools, callbacks);
       case 'openai':
         return this.callOpenAIStream(messages, tools, callbacks);
+      case 'ollama':
+        return this.callOllamaStream(messages, tools, callbacks);
       default:
         throw new Error(`Unsupported provider: ${this.config.provider}`);
     }
@@ -184,6 +188,143 @@ export class LLMService {
     }
 
     return payload;
+  }
+
+  /**
+   * 调用 Ollama API（非流式）
+   */
+  private async callOllama(
+    messages: ConversationMessage[],
+    tools?: any[],
+    options?: { maxTokens?: number }
+  ): Promise<{ content: string; tool_calls?: any[] }> {
+    const url = this.config.baseUrl || 'http://localhost:11434/api/chat';
+
+    const payload = {
+      model: this.config.model,
+      messages: messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+      stream: false,
+      options: {
+        temperature: this.config.temperature ?? 0.7,
+        num_predict: options?.maxTokens ?? this.config.maxTokens ?? 4096,
+      },
+    };
+
+    try {
+      const response = await axios.post(url, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      return {
+        content: response.data.message?.content || '',
+      };
+    } catch (error: any) {
+      const errorDetail = error.response?.data
+        ? JSON.stringify(error.response.data, null, 2)
+        : error.message;
+      logger.error('LLMService', `Ollama API error: ${errorDetail}`);
+      throw new Error(`Ollama API error: ${errorDetail}`);
+    }
+  }
+
+  /**
+   * 调用 Ollama API（流式）
+   */
+  private async callOllamaStream(
+    messages: ConversationMessage[],
+    tools?: any[],
+    callbacks?: { onChunk?: (chunk: string) => void }
+  ): Promise<{ content: string; tool_calls?: any[] }> {
+    const url = this.config.baseUrl || 'http://localhost:11434/api/chat';
+    const payload = {
+      model: this.config.model,
+      messages: messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+      stream: true,
+      options: {
+        temperature: this.config.temperature ?? 0.7,
+        num_predict: this.config.maxTokens ?? 4096,
+      },
+    };
+
+    const TIMEOUT_MS = 120000;
+
+    try {
+      const response = await axios.post(url, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        responseType: 'stream',
+        timeout: TIMEOUT_MS,
+      });
+
+      const stream = response.data as NodeJS.ReadableStream;
+      let content = '';
+      let isCompleted = false;
+
+      return new Promise((resolve, reject) => {
+        const timeoutTimer = setTimeout(() => {
+          if (!isCompleted) {
+            isCompleted = true;
+            reject(new Error(`Stream timeout after ${TIMEOUT_MS}ms`));
+          }
+        }, TIMEOUT_MS);
+
+        stream.on('data', (chunk: Buffer) => {
+          const lines = chunk.toString('utf-8').split('\n');
+          
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            
+            try {
+              const parsed = JSON.parse(line);
+              if (parsed.message?.content) {
+                content += parsed.message.content;
+                callbacks?.onChunk?.(parsed.message.content);
+              }
+              if (parsed.done) {
+                if (!isCompleted) {
+                  isCompleted = true;
+                  clearTimeout(timeoutTimer);
+                  resolve({ content });
+                }
+              }
+            } catch {
+              // 忽略无法解析的行
+            }
+          }
+        });
+
+        stream.on('end', () => {
+          if (!isCompleted) {
+            isCompleted = true;
+            clearTimeout(timeoutTimer);
+            resolve({ content });
+          }
+        });
+
+        stream.on('error', (err: Error) => {
+          if (!isCompleted) {
+            isCompleted = true;
+            clearTimeout(timeoutTimer);
+            reject(new Error(`Stream error: ${err.message}`));
+          }
+        });
+      });
+    } catch (error: any) {
+      const errorDetail = error.response?.data
+        ? JSON.stringify(error.response.data, null, 2)
+        : error.message;
+      logger.error('LLMService', `Ollama Stream API error: ${errorDetail}`);
+      throw new Error(`Ollama Stream API error: ${errorDetail}`);
+    }
   }
 
   /**

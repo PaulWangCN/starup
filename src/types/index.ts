@@ -449,7 +449,7 @@ export interface HeartbeatTask {
 // ==================== LLM 配置 ====================
 
 export interface LLMConfig {
-  provider: 'deepseek' | 'openai' | 'anthropic';
+  provider: 'deepseek' | 'openai' | 'anthropic' | 'ollama';
   apiKey: string;
   baseUrl?: string;
   model: string;
