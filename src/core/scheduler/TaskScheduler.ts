@@ -153,7 +153,7 @@ export class TaskScheduler {
 
     let prompt = task.prompt;
     try {
-      const propsPath = path.join(process.cwd(), '.starup', 'task', task.name, 'props.json');
+      const propsPath = path.join(process.cwd(), '.starup', 'tasks', task.name, 'props.json');
       const propsContent = await fs.readFile(propsPath, 'utf-8');
       const props = JSON.parse(propsContent);
       const propsText = typeof props === 'object' ? JSON.stringify(props, null, 2) : String(props);
