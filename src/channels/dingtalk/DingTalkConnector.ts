@@ -1,5 +1,6 @@
 import axios from 'axios';
 import * as dingtalkStream from 'dingtalk-stream';
+import { logger } from '../../utils/Logger';
 import {
   ChannelConnector,
   ChannelConfig,
@@ -49,7 +50,7 @@ export class DingTalkConnector implements ChannelConnector {
       return;
     }
     if (!this.config.enabled) {
-      console.log('[DingTalkConnector] Disabled');
+      logger.debug('DingTalkConnector', 'Disabled');
       return;
     }
     if (this.client) {
@@ -60,7 +61,7 @@ export class DingTalkConnector implements ChannelConnector {
     const clientSecret = this.config.credentials.client_secret || this.config.credentials.app_secret;
 
     if (!clientId || !clientSecret) {
-      console.error('[DingTalkConnector] Missing client_id/client_secret or app_id/app_secret');
+      logger.error('DingTalkConnector', 'Missing client_id/client_secret or app_id/app_secret');
       return;
     }
 
@@ -70,14 +71,14 @@ export class DingTalkConnector implements ChannelConnector {
       debug: false,
     });
 
-    console.log('[DingTalkConnector] Initialized');
+    logger.debug('DingTalkConnector', 'Initialized');
   }
 
   async start(): Promise<void> {
     if (!this.config?.enabled || !this.client) return;
     if (this.client.connected) return;
 
-    console.log('[DingTalkConnector] Starting Stream connection...');
+    logger.debug('DingTalkConnector', 'Starting Stream connection...');
 
     // 配置订阅：机器人消息
     this.client.config.subscriptions = [
@@ -94,14 +95,14 @@ export class DingTalkConnector implements ChannelConnector {
     });
 
     await this.client.connect();
-    console.log('[DingTalkConnector] Stream connected');
+    logger.debug('DingTalkConnector', 'Stream connected');
   }
 
   async stop(): Promise<void> {
     if (this.client) {
       this.client.disconnect();
       this.client.removeAllListeners();
-      console.log('[DingTalkConnector] Stopped');
+      logger.debug('DingTalkConnector', 'Stopped');
     }
   }
 
@@ -125,9 +126,9 @@ export class DingTalkConnector implements ChannelConnector {
         headers: { 'Content-Type': 'application/json' },
         timeout: 10000,
       });
-      console.log(`[DingTalkConnector] Message sent via sessionWebhook`);
+      logger.debug('DingTalkConnector', 'Message sent via sessionWebhook');
     } catch (error) {
-      console.error('[DingTalkConnector] Failed to send message:', error);
+      logger.error('DingTalkConnector', `Failed to send message: ${error}`);
       throw error;
     }
   }
@@ -147,7 +148,7 @@ export class DingTalkConnector implements ChannelConnector {
     try {
       robotMsg = JSON.parse(message.data);
     } catch (err) {
-      console.error('[DingTalkConnector] Failed to parse robot message:', err);
+      logger.error('DingTalkConnector', `Failed to parse robot message: ${err}`);
       return;
     }
 

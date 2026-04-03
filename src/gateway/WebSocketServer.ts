@@ -5,6 +5,7 @@
 
 import { WebSocketServer as WSServer, WebSocket } from 'ws';
 import { Gateway } from './Gateway';
+import { logger } from '../utils/Logger';
 import { GatewayClient, ClientRole, StreamChunk } from './types';
 
 interface WSMessage {
@@ -24,7 +25,7 @@ export class WebSocketServer {
   async start(port: number): Promise<void> {
     return new Promise((resolve, reject) => {
       this.server = new WSServer({ port }, () => {
-        console.log(`[WebSocketServer] Listening on port ${port}`);
+        logger.debug('WebSocketServer', `Listening on port ${port}`);
         resolve();
       });
 
@@ -38,7 +39,7 @@ export class WebSocketServer {
 
       this.server.on('connection', (ws, req) => {
         const clientId = `ws-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-        console.log(`[WebSocketServer] Client connected: ${clientId} from ${req.socket.remoteAddress}`);
+        logger.debug('WebSocketServer', `Client connected: ${clientId} from ${req.socket.remoteAddress}`);
 
         const client: GatewayClient = {
           id: clientId,
@@ -60,12 +61,12 @@ export class WebSocketServer {
         });
 
         ws.on('close', () => {
-          console.log(`[WebSocketServer] Client disconnected: ${clientId}`);
+          logger.debug('WebSocketServer', `Client disconnected: ${clientId}`);
           this.gateway.removeClient(clientId);
         });
 
         ws.on('error', (err) => {
-          console.error(`[WebSocketServer] Client error: ${clientId}`, err);
+          logger.error('WebSocketServer', `Client error: ${clientId} ${err}`);
         });
 
         // 发送欢迎消息
@@ -81,7 +82,7 @@ export class WebSocketServer {
       });
       return new Promise((resolve) => {
         this.server!.close(() => {
-          console.log('[WebSocketServer] Stopped');
+          logger.debug('WebSocketServer', 'Stopped');
           resolve();
         });
       });

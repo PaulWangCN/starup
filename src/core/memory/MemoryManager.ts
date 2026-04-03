@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { MemoryEntry, MemoryType, MemoryFrontmatter, ParsedMemory, RelevantMemory } from '../../types';
 import { LLMService } from '../llm/LLMService';
+import { logger } from '../../utils/Logger';
 
 /**
  * 记忆管理器 v2
@@ -42,7 +43,7 @@ export class MemoryManager {
     try {
       await fs.mkdir(this.memoryDir, { recursive: true });
     } catch (error) {
-      console.error('[MemoryManager] Failed to create memory directory:', error);
+      logger.error('MemoryManager', `Failed to create memory directory: ${error}`);
     }
   }
 
@@ -275,7 +276,7 @@ export class MemoryManager {
           }
         }
       } catch (error) {
-        console.error(`[MemoryManager] Failed to scan ${dir}:`, error);
+        logger.error('MemoryManager', `Failed to scan ${dir}: ${error}`);
       }
     };
 
@@ -337,7 +338,7 @@ export class MemoryManager {
 
       return results.slice(0, this.MAX_RELEVANT_MEMORIES);
     } catch (error) {
-      console.error('[MemoryManager] AI selection failed, falling back:', error);
+      logger.error('MemoryManager', `AI selection failed, falling back: ${error}`);
       return this.fallbackKeywordSearch(query, allMemories);
     }
   }

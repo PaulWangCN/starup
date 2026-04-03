@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { LLMConfig, ConversationMessage } from '../../types';
+import { logger } from '../../utils/Logger';
 
 /**
  * LLM 服务
@@ -86,7 +87,7 @@ export class LLMService {
         tool_calls: choice.message.tool_calls,
       };
     } catch (error: any) {
-      console.error('[LLMService] DeepSeek API error:', error.response?.data || error.message);
+      logger.error('LLMService', `DeepSeek API error: ${error.response?.data || error.message}`);
       throw new Error(`DeepSeek API error: ${error.message}`);
     }
   }
@@ -117,7 +118,7 @@ export class LLMService {
         tool_calls: choice.message.tool_calls,
       };
     } catch (error: any) {
-      console.error('[LLMService] OpenAI API error:', error.response?.data || error.message);
+      logger.error('LLMService', `OpenAI API error: ${error.response?.data || error.message}`);
       throw new Error(`OpenAI API error: ${error.message}`);
     }
   }
@@ -294,7 +295,7 @@ export class LLMService {
         });
       });
     } catch (error: any) {
-      console.error('[LLMService] Stream API error:', error.response?.data || error.message);
+      logger.error('LLMService', `Stream API error: ${error.response?.data || error.message}`);
       throw new Error(`Stream API error: ${error.message}`);
     }
   }

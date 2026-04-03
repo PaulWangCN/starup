@@ -7,6 +7,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { ToolDefinition, Skill, ToolParameter } from '../../types';
+import { logger } from '../../utils/Logger';
 
 // ==================== 类型定义 ====================
 
@@ -131,7 +132,7 @@ export class PromptAssembler {
 
   private getAgentPath(agentId: string): string {
     const agentPath = path.join(process.cwd(), '.starup');
-    console.log(`[PromptAssembler] Agent path: ${agentPath} (cwd=${process.cwd()})`);
+    logger.debug('PromptAssembler', `Agent path: ${agentPath} (cwd=${process.cwd()})`);
     return agentPath;
   }
 
@@ -141,28 +142,28 @@ export class PromptAssembler {
    */
   private async loadLayer0(agentPath: string): Promise<string> {
     const agentsPath = path.join(agentPath, 'AGENTS.md');
-    console.log(`[PromptAssembler] Loading AGENTS.md from: ${agentsPath}`);
+    logger.debug('PromptAssembler', `Loading AGENTS.md from: ${agentsPath}`);
     try {
       const cached = this.cache.get('agents');
       if (cached && this.config.layers.agents.readonly) return cached.content;
       const content = await fs.readFile(agentsPath, 'utf-8');
-      console.log(`[PromptAssembler] Successfully loaded AGENTS.md (${content.length} chars)`);
+      logger.debug('PromptAssembler', `Successfully loaded AGENTS.md (${content.length} chars)`);
       this.cache.set('agents', { content, timestamp: Date.now() });
       return this.wrapLayer('AGENTS', content);
     } catch (error) {
-      console.error(`[PromptAssembler] CRITICAL: Failed to load AGENTS.md from ${agentsPath}:`, error);
+      logger.error('PromptAssembler', `Failed to load AGENTS.md from ${agentsPath}: ${error}`);
       throw new Error(`Failed to load AGENTS.md: ${error}`);
     }
   }
 
   private async loadLayer1(agentPath: string): Promise<string> {
     const soulPath = path.join(agentPath, 'SOUL.md');
-    console.log(`[PromptAssembler] Loading SOUL.md from: ${soulPath}`);
+    logger.debug('PromptAssembler', `Loading SOUL.md from: ${soulPath}`);
     try {
       const cached = this.cache.get('soul');
       if (cached && this.config.layers.soul.readonly) return cached.content;
       const content = await fs.readFile(soulPath, 'utf-8');
-      console.log(`[PromptAssembler] Successfully loaded SOUL.md (${content.length} chars)`);
+      logger.debug('PromptAssembler', `Successfully loaded SOUL.md (${content.length} chars)`);
       const hash = crypto.createHash('sha256').update(content).digest('hex');
       if (this.config.layers.soul.hash && this.config.layers.soul.hash !== hash) {
         return cached?.content || content;
@@ -170,40 +171,40 @@ export class PromptAssembler {
       this.cache.set('soul', { content, timestamp: Date.now() });
       return this.wrapLayer('SOUL', content);
     } catch (error) {
-      console.error(`[PromptAssembler] CRITICAL: Failed to load SOUL.md from ${soulPath}:`, error);
+      logger.error('PromptAssembler', `Failed to load SOUL.md from ${soulPath}: ${error}`);
       throw new Error(`Failed to load SOUL.md: ${error}`);
     }
   }
 
   private async loadLayer2(agentPath: string): Promise<string> {
     const identityPath = path.join(agentPath, 'IDENTITY.md');
-    console.log(`[PromptAssembler] Loading IDENTITY.md from: ${identityPath}`);
+    logger.debug('PromptAssembler', `Loading IDENTITY.md from: ${identityPath}`);
     const cacheTtl = this.config.layers.identity.cache_ttl * 1000;
     try {
       const cached = this.cache.get('identity');
       if (cached && Date.now() - cached.timestamp < cacheTtl) return cached.content;
       const content = await fs.readFile(identityPath, 'utf-8');
-      console.log(`[PromptAssembler] Successfully loaded IDENTITY.md (${content.length} chars)`);
+      logger.debug('PromptAssembler', `Successfully loaded IDENTITY.md (${content.length} chars)`);
       this.cache.set('identity', { content, timestamp: Date.now() });
       return this.wrapLayer('IDENTITY', content);
     } catch (error) {
-      console.error(`[PromptAssembler] CRITICAL: Failed to load IDENTITY.md from ${identityPath}:`, error);
+      logger.error('PromptAssembler', `Failed to load IDENTITY.md from ${identityPath}: ${error}`);
       throw new Error(`Failed to load IDENTITY.md: ${error}`);
     }
   }
 
   private async loadLayer3(agentPath: string): Promise<string> {
     const userPath = path.join(agentPath, 'USER.md');
-    console.log(`[PromptAssembler] Loading USER.md from: ${userPath}`);
+    logger.debug('PromptAssembler', `Loading USER.md from: ${userPath}`);
     try {
       const content = await fs.readFile(userPath, 'utf-8');
-      console.log(`[PromptAssembler] Successfully loaded USER.md (${content.length} chars)`);
+      logger.debug('PromptAssembler', `Successfully loaded USER.md (${content.length} chars)`);
       if (this.config.layers.user_profile.auto_update) {
         this.cache.set('user_profile', { content, timestamp: Date.now() });
       }
       return this.wrapLayer('USER_PROFILE', content);
     } catch (error) {
-      console.error(`[PromptAssembler] CRITICAL: Failed to load USER.md from ${userPath}:`, error);
+      logger.error('PromptAssembler', `Failed to load USER.md from ${userPath}: ${error}`);
       throw new Error(`Failed to load USER.md: ${error}`);
     }
   }

@@ -3,6 +3,7 @@ import * as path from 'path';
 import { LLMService } from '../llm/LLMService';
 import { SessionContext } from '../../types';
 import { skillRegistry } from '../skills/SkillRegistry';
+import { logger } from '../../utils/Logger';
 
 /**
  * 意图识别结果
@@ -74,7 +75,7 @@ export class IntentRouter {
         const parsed = this.parseJSON(response.content);
         result = this.buildRecognition(parsed, message);
       } catch (error) {
-        console.error('[IntentRouter] LLM classification failed:', error);
+        logger.error('IntentRouter', `LLM classification failed: ${error}`);
         result = this.fallbackRecognition(message);
       }
     } else {
@@ -82,11 +83,7 @@ export class IntentRouter {
     }
 
     const latency = Date.now() - startTime;
-    console.log(
-      `[IntentRouter] Recognized: ${result.intent_id} ` +
-      `(confidence: ${result.confidence.toFixed(2)}, ` +
-      `latency: ${latency}ms)`
-    );
+    logger.debug('IntentRouter', `Recognized: ${result.intent_id} (confidence: ${result.confidence.toFixed(2)}, latency: ${latency}ms)`);
 
     return result;
   }

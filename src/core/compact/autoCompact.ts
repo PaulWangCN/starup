@@ -9,6 +9,7 @@ import { LLMService } from '../llm/LLMService';
 import { SessionSnapshotManager } from '../session/SessionSnapshot';
 import { estimateMessageTokens, estimateMessagesTokens } from './tokens';
 import { compactConversation, adjustIndexToPreserveAPIInvariants } from './compact';
+import { logger } from '../../utils/Logger';
 
 const MAX_OUTPUT_TOKENS_FOR_SUMMARY = 8_000;
 const AUTOCOMPACT_BUFFER_TOKENS = 13_000;
@@ -259,7 +260,7 @@ export async function autoCompactIfNeeded(
 
   tracking.consecutiveFailures++;
   if (tracking.consecutiveFailures >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES) {
-    console.warn(`[AutoCompact] Circuit breaker triggered for session ${session.id}`);
+    logger.warn('AutoCompact', `Circuit breaker triggered for session ${session.id}`);
   }
 
   return { wasCompacted: false };

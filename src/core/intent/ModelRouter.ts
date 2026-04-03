@@ -5,6 +5,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { logger } from '../../utils/Logger';
 
 /**
  * 意图-模型映射配置
@@ -86,7 +87,7 @@ export class ModelRouter {
 
     // 检查配额
     if (!this.checkQuota(mapping.model)) {
-      console.warn(`[ModelRouter] Quota exceeded for model ${mapping.model}, using fallback`);
+      logger.warn('ModelRouter', `Quota exceeded for model ${mapping.model}, using fallback`);
       return {
         model: this.config.fallbackModel,
         temperature: mapping.temperature ?? 0.7,
@@ -166,7 +167,7 @@ export class ModelRouter {
   async loadConfig(configPath: string): Promise<void> {
     try {
       if (!fs.existsSync(configPath)) {
-        console.warn(`[ModelRouter] Config file not found: ${configPath}`);
+        logger.warn('ModelRouter', `Config file not found: ${configPath}`);
         return;
       }
 
@@ -179,9 +180,9 @@ export class ModelRouter {
         ...loadedConfig,
       };
 
-      console.log(`[ModelRouter] Config loaded from ${configPath}`);
+      logger.debug('ModelRouter', `Config loaded from ${configPath}`);
     } catch (error) {
-      console.error(`[ModelRouter] Failed to load config:`, error);
+      logger.error('ModelRouter', `Failed to load config: ${error}`);
       throw error;
     }
   }
@@ -204,9 +205,9 @@ export class ModelRouter {
         'utf-8'
       );
 
-      console.log(`[ModelRouter] Config saved to ${configPath}`);
+      logger.debug('ModelRouter', `Config saved to ${configPath}`);
     } catch (error) {
-      console.error(`[ModelRouter] Failed to save config:`, error);
+      logger.error('ModelRouter', `Failed to save config: ${error}`);
       throw error;
     }
   }
@@ -258,7 +259,7 @@ export class ModelRouter {
   resetDailyStats(): void {
     this.usageStats.clear();
     this.lastResetDate = this.getCurrentDate();
-    console.log('[ModelRouter] Daily stats reset');
+    logger.debug('ModelRouter', 'Daily stats reset');
   }
 
   /**
@@ -276,7 +277,7 @@ export class ModelRouter {
     }
   ): void {
     this.config.intentMappings[intentId] = mapping;
-    console.log(`[ModelRouter] Updated mapping for intent ${intentId} -> ${mapping.model}`);
+    logger.debug('ModelRouter', `Updated mapping for intent ${intentId} -> ${mapping.model}`);
   }
 
   /**
@@ -288,7 +289,7 @@ export class ModelRouter {
     const existed = intentId in this.config.intentMappings;
     if (existed) {
       delete this.config.intentMappings[intentId];
-      console.log(`[ModelRouter] Removed mapping for intent ${intentId}`);
+      logger.debug('ModelRouter', `Removed mapping for intent ${intentId}`);
     }
     return existed;
   }
@@ -308,7 +309,7 @@ export class ModelRouter {
    */
   setQuota(model: string, quota: number): void {
     this.config.dailyQuota[model] = quota;
-    console.log(`[ModelRouter] Set quota for ${model}: ${quota}`);
+    logger.debug('ModelRouter', `Set quota for ${model}: ${quota}`);
   }
 
   /**

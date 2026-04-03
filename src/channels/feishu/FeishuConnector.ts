@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import * as lark from '@larksuiteoapi/node-sdk';
+import { logger } from '../../utils/Logger';
 import {
   ChannelConnector,
   ChannelConfig,
@@ -53,7 +54,7 @@ export class FeishuConnector implements ChannelConnector {
       return;
     }
     if (!this.config.enabled) {
-      console.log('[FeishuConnector] Disabled');
+      logger.debug('FeishuConnector', 'Disabled');
       return;
     }
     if (this.httpClient) {
@@ -66,7 +67,7 @@ export class FeishuConnector implements ChannelConnector {
     });
 
     await this.refreshToken();
-    console.log('[FeishuConnector] Initialized');
+    logger.debug('FeishuConnector', 'Initialized');
   }
 
   /**
@@ -78,11 +79,11 @@ export class FeishuConnector implements ChannelConnector {
 
     const { app_id, app_secret } = this.config.credentials;
     if (!app_id || !app_secret) {
-      console.error('[FeishuConnector] Missing app_id or app_secret for WebSocket');
+      logger.error('FeishuConnector', 'Missing app_id or app_secret for WebSocket');
       return;
     }
 
-    console.log('[FeishuConnector] Starting WebSocket long connection...');
+    logger.debug('FeishuConnector', 'Starting WebSocket long connection...');
 
     // 启动定期刷新 token（用于发送消息）
     if (!this.tokenRefreshTimer) {
@@ -125,7 +126,7 @@ export class FeishuConnector implements ChannelConnector {
     }
     this.eventDispatcher = null;
     this.httpClient = null;
-    console.log('[FeishuConnector] Stopped');
+      logger.debug('FeishuConnector', 'Stopped');
   }
 
   /**
@@ -160,9 +161,9 @@ export class FeishuConnector implements ChannelConnector {
         });
       }
 
-      console.log(`[FeishuConnector] Message sent to ${target.user_id || target.group_id}`);
+      logger.debug('FeishuConnector', `Message sent to ${target.user_id || target.group_id}`);
     } catch (error) {
-      console.error('[FeishuConnector] Failed to send message:', error);
+      logger.error('FeishuConnector', `Failed to send message: ${error}`);
       throw error;
     }
   }
@@ -195,23 +196,23 @@ export class FeishuConnector implements ChannelConnector {
   private handleSdkEvent(data: any): void {
     if (!this.messageCallback) return;
 
-    console.log('[FeishuConnector] SDK event received:', data?.header?.event_type || 'unknown');
+    logger.debug('FeishuConnector', `SDK event received: ${data?.header?.event_type || 'unknown'}`);
 
     // SDK 的 EventDispatcher.parse 会把 event 字段展平到 data 中
     // 所以 data.message 就是 FeishuMessage，而不是 data.event.message
     const msg = (data?.message || data?.event?.message) as FeishuMessage;
     if (!msg) {
-      console.log('[FeishuConnector] No message in event data');
+      logger.debug('FeishuConnector', 'No message in event data');
       return;
     }
 
     // 过滤机器人自己发送的消息
     if (msg.sender?.sender_type === 'bot') {
-      console.log('[FeishuConnector] Ignoring bot self-message');
+      logger.debug('FeishuConnector', 'Ignoring bot self-message');
       return;
     }
 
-    console.log('[FeishuConnector] Processing message from', msg.sender?.sender_id?.open_id);
+    logger.debug('FeishuConnector', `Processing message from ${msg.sender?.sender_id?.open_id}`);
     const message = this.convertToUnifiedMessage(msg);
     this.messageCallback(message);
   }
@@ -230,7 +231,7 @@ export class FeishuConnector implements ChannelConnector {
       if (response.data.code === 0) {
         this.tenantAccessToken = response.data.tenant_access_token;
         this.tokenExpiry = Date.now() + (response.data.expire - 60) * 1000;
-        console.log('[FeishuConnector] Token refreshed');
+        logger.debug('FeishuConnector', 'Token refreshed');
       } else {
         throw new Error(`Token refresh failed: ${response.data.msg}`);
       }

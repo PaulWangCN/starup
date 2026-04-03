@@ -6,6 +6,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { logger } from '../utils/Logger';
 import { Gateway } from './Gateway';
 import { OutgoingMessage } from '../types';
 
@@ -45,10 +46,10 @@ export class HeartbeatManager {
     if (this.timer) return;
     this.timer = setInterval(() => {
       this.runHeartbeat().catch((err) => {
-        console.error('[HeartbeatManager] Error:', err);
+        logger.error('HeartbeatManager', `Error: ${err}`);
       });
     }, this.interval);
-    console.log(`[HeartbeatManager] Started (interval: ${this.interval}ms)`);
+    logger.debug('HeartbeatManager', `Started (interval: ${this.interval}ms)`);
   }
 
   /**
@@ -58,7 +59,7 @@ export class HeartbeatManager {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
-      console.log('[HeartbeatManager] Stopped');
+      logger.debug('HeartbeatManager', 'Stopped');
     }
     if (this.sessionId) {
       try {
@@ -79,20 +80,20 @@ export class HeartbeatManager {
     try {
       content = await fs.readFile(this.heartbeatPath, 'utf-8');
     } catch {
-      console.log('[HeartbeatManager] HEARTBEAT.md not found, skipping');
+      logger.debug('HeartbeatManager', 'HEARTBEAT.md not found, skipping');
       return;
     }
 
     // 2. 检查是否有实际任务内容
     if (!this.hasRealTask(content)) {
-      console.log('[HeartbeatManager] No real task in heartbeat, skipping');
+      logger.debug('HeartbeatManager', 'No real task in heartbeat, skipping');
       return;
     }
 
     // 3. 获取已启用的渠道列表
     const enabledChannels = this.gateway.adapters.list();
     if (enabledChannels.length === 0) {
-      console.log('[HeartbeatManager] No channels enabled, skipping notification');
+      logger.debug('HeartbeatManager', 'No channels enabled, skipping notification');
       return;
     }
 
@@ -100,7 +101,7 @@ export class HeartbeatManager {
     if (!this.sessionId) {
       const systemPrompt = this.gateway.core.getSystemPrompt();
       if (!systemPrompt) {
-        console.log('[HeartbeatManager] System prompt not ready, skipping');
+        logger.debug('HeartbeatManager', 'System prompt not ready, skipping');
         return;
       }
       const session = this.gateway.core.sessionManager.createStandaloneSession(systemPrompt);
@@ -120,13 +121,13 @@ export class HeartbeatManager {
         session.updatedAt = Date.now();
       }
     } catch (error) {
-      console.error('[HeartbeatManager] Failed to process heartbeat:', error);
+      logger.error('HeartbeatManager', `Failed to process heartbeat: ${error}`);
       return;
     }
 
     // 6. 判断结果是否包含实际内容（不是 HEARTBEAT_OK 或空）
     if (!result || result.trim() === 'HEARTBEAT_OK' || result.trim() === '') {
-      console.log('[HeartbeatManager] Agent returned HEARTBEAT_OK or empty, no notification needed');
+      logger.debug('HeartbeatManager', 'Agent returned HEARTBEAT_OK or empty, no notification needed');
       return;
     }
 
@@ -135,7 +136,7 @@ export class HeartbeatManager {
     const targetChannel = this.selectChannel(channel, enabledChannels);
     
     if (!targetChannel) {
-      console.log('[HeartbeatManager] No suitable channel found, skipping notification');
+      logger.debug('HeartbeatManager', 'No suitable channel found, skipping notification');
       return;
     }
 
@@ -201,7 +202,7 @@ export class HeartbeatManager {
     
     // 2. 如果指定了渠道但未启用，放弃
     if (preferredChannel) {
-      console.log(`[HeartbeatManager] Preferred channel '${preferredChannel}' not enabled`);
+      logger.debug('HeartbeatManager', `Preferred channel '${preferredChannel}' not enabled`);
       return null;
     }
     
@@ -231,7 +232,7 @@ export class HeartbeatManager {
     }
     
     if (!targetUserId) {
-      console.log(`[HeartbeatManager] No target user for channel '${channel}'`);
+      logger.debug('HeartbeatManager', `No target user for channel '${channel}'`);
       return;
     }
 
@@ -243,9 +244,9 @@ export class HeartbeatManager {
 
     try {
       await this.gateway.adapters.sendTo(channel, message);
-      console.log(`[HeartbeatManager] Notification sent via ${channel} to ${targetUserId}`);
+      logger.debug('HeartbeatManager', `Notification sent via ${channel} to ${targetUserId}`);
     } catch (error) {
-      console.error(`[HeartbeatManager] Failed to send via ${channel}:`, error);
+      logger.error('HeartbeatManager', `Failed to send via ${channel}: ${error}`);
     }
   }
 }

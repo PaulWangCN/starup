@@ -5,6 +5,7 @@
 
 import express, { Request, Response, NextFunction } from 'express';
 import { Gateway } from './Gateway';
+import { logger } from '../utils/Logger';
 import { ChatRequest } from './types';
 
 export class HttpServer {
@@ -191,7 +192,7 @@ export class HttpServer {
       // 1. 飞书 URL 验证（配置事件订阅时触发）
       if (body.type === 'url_verification') {
         res.json({ challenge: body.challenge });
-        console.log('[HttpServer] Feishu URL verification handled');
+      logger.debug('HttpServer', 'Feishu URL verification handled');
         return;
       }
 
@@ -235,7 +236,7 @@ export class HttpServer {
   async start(port: number): Promise<void> {
     return new Promise((resolve, reject) => {
       this.server = this.app.listen(port, () => {
-        console.log(`[HttpServer] Listening on port ${port}`);
+        logger.debug('HttpServer', `Listening on port ${port}`);
         resolve();
       });
       
@@ -253,7 +254,7 @@ export class HttpServer {
     if (this.server) {
       return new Promise((resolve) => {
         this.server.close(() => {
-          console.log('[HttpServer] Stopped');
+          logger.debug('HttpServer', 'Stopped');
           resolve();
         });
       });

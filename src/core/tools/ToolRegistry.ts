@@ -1,5 +1,6 @@
 import { ToolDefinition, ToolResult, Session, ScheduledTask, TaskExecutor } from '../../types';
 import * as path from 'path';
+import { logger } from '../../utils/Logger';
 import {
   listSkillsTool,
   fetchTool,
@@ -86,7 +87,7 @@ export class ToolRegistry {
 
   setWorkingDir(dir: string): void {
     this.workingDir = dir;
-    console.log(`[ToolRegistry] Working directory set to: ${dir}`);
+    logger.debug('ToolRegistry', `Working directory set to: ${dir}`);
   }
 
   getWorkingDir(): string {

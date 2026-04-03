@@ -6,6 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Session, ConversationMessage } from '../../types';
+import { logger } from '../../utils/Logger';
 
 /**
  * 实体信息
@@ -126,10 +127,10 @@ export class SessionSnapshotManager {
       const data = await fs.promises.readFile(snapshotPath, 'utf-8');
       const snapshot: SessionSnapshot = JSON.parse(data);
       
-      console.log(`[SessionSnapshotManager] Snapshot loaded from ${snapshotPath}`);
+      logger.debug('SessionSnapshotManager', `Snapshot loaded from ${snapshotPath}`);
       return snapshot;
     } catch (error) {
-      console.error(`[SessionSnapshotManager] Failed to load snapshot:`, error);
+      logger.error('SessionSnapshotManager', `Failed to load snapshot: ${error}`);
       return null;
     }
   }
@@ -142,11 +143,7 @@ export class SessionSnapshotManager {
   async restoreToSession(sessionId: string, snapshot: SessionSnapshot): Promise<void> {
     // 注意：实际恢复逻辑需要根据具体应用实现
     // 这里提供基础框架
-    console.log(`[SessionSnapshotManager] Restoring snapshot to session ${sessionId}`);
-    console.log(`  - Summary: ${snapshot.summary}`);
-    console.log(`  - Entities: ${snapshot.keyEntities.length}`);
-    console.log(`  - Tasks: ${snapshot.pendingTasks.length}`);
-    console.log(`  - Intent: ${snapshot.contextState.currentIntent || 'none'}`);
+    logger.debug('SessionSnapshotManager', `Restoring snapshot to session ${sessionId}, Summary: ${snapshot.summary}, Entities: ${snapshot.keyEntities.length}, Tasks: ${snapshot.pendingTasks.length}, Intent: ${snapshot.contextState.currentIntent || 'none'}`);
     
     // 实际应用中，这里应该调用 sessionManager 来更新会话状态
   }
@@ -173,14 +170,14 @@ export class SessionSnapshotManager {
             const snapshot: SessionSnapshot = JSON.parse(data);
             snapshots.push(snapshot);
           } catch (error) {
-            console.warn(`[SessionSnapshotManager] Failed to parse snapshot file: ${file}`);
+            logger.warn('SessionSnapshotManager', `Failed to parse snapshot file: ${file}`);
           }
         }
       }
 
       return snapshots.sort((a, b) => a.timestamp - b.timestamp);
     } catch (error) {
-      console.error(`[SessionSnapshotManager] Failed to list snapshots:`, error);
+      logger.error('SessionSnapshotManager', `Failed to list snapshots: ${error}`);
       return [];
     }
   }
@@ -209,9 +206,9 @@ export class SessionSnapshotManager {
         }
       }
 
-      console.log(`[SessionSnapshotManager] Cleaned ${deletedCount} expired snapshots for ${sessionId}`);
+      logger.debug('SessionSnapshotManager', `Cleaned ${deletedCount} expired snapshots for ${sessionId}`);
     } catch (error) {
-      console.error(`[SessionSnapshotManager] Failed to clean expired snapshots:`, error);
+      logger.error('SessionSnapshotManager', `Failed to clean expired snapshots: ${error}`);
     }
   }
 
@@ -240,14 +237,14 @@ export class SessionSnapshotManager {
               deletedCount++;
             }
           } catch (error) {
-            console.warn(`[SessionSnapshotManager] Failed to process file: ${file}`);
+            logger.warn('SessionSnapshotManager', `Failed to process file: ${file}`);
           }
         }
       }
 
-      console.log(`[SessionSnapshotManager] Cleaned ${deletedCount} total expired snapshots`);
+      logger.debug('SessionSnapshotManager', `Cleaned ${deletedCount} total expired snapshots`);
     } catch (error) {
-      console.error(`[SessionSnapshotManager] Failed to clean all expired snapshots:`, error);
+      logger.error('SessionSnapshotManager', `Failed to clean all expired snapshots: ${error}`);
     }
   }
 
@@ -452,11 +449,9 @@ export class SessionSnapshotManager {
         }
       }
 
-      console.log(
-        `[SessionSnapshotManager] Retained ${maxCount} snapshots for ${sessionId}, cleaned ${toDelete.length}`
-      );
+      logger.debug('SessionSnapshotManager', `Retained ${maxCount} snapshots for ${sessionId}, cleaned ${toDelete.length}`);
     } catch (error) {
-      console.error(`[SessionSnapshotManager] Failed to retain latest snapshots:`, error);
+      logger.error('SessionSnapshotManager', `Failed to retain latest snapshots: ${error}`);
     }
   }
 
@@ -466,7 +461,7 @@ export class SessionSnapshotManager {
   private ensureDirectoryExists(): void {
     if (!fs.existsSync(this.snapshotDir)) {
       fs.mkdirSync(this.snapshotDir, { recursive: true });
-      console.log(`[SessionSnapshotManager] Created snapshot directory: ${this.snapshotDir}`);
+      logger.debug('SessionSnapshotManager', `Created snapshot directory: ${this.snapshotDir}`);
     }
   }
 }

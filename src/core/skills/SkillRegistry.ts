@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import YAML from 'yaml';
 import { Skill, SkillPackage, SkillManifest } from '../../types';
+import { logger } from '../../utils/Logger';
 
 /**
  * Skill 注册表（简化版）
@@ -120,7 +121,7 @@ export class SkillRegistry {
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        console.warn(`[SkillRegistry] Scan directory failed: ${dir}`, error);
+        logger.warn('SkillRegistry', `Scan directory failed: ${dir}, ${error}`);
       }
     }
   }
@@ -251,7 +252,7 @@ export class SkillRegistry {
     await fs.mkdir(path.dirname(this.skillsIndexPath), { recursive: true });
     await fs.writeFile(this.skillsIndexPath, lines.join('\n'), 'utf-8');
     
-    console.log(`[SkillRegistry] Skills index updated: ${all.length} skills`);
+    logger.debug('SkillRegistry', `Skills index updated: ${all.length} skills`);
   }
 
 
@@ -326,7 +327,7 @@ export class SkillRegistry {
   private startAutoScan(): void {
     if (this.scanInterval) return;
     this.scanInterval = setInterval(() => {
-      this.rescan().catch((err) => console.error('[SkillRegistry] Auto scan failed:', err));
+      this.rescan().catch((err) => logger.error('SkillRegistry', `Auto scan failed: ${err}`));
     }, 4 * 60 * 60 * 1000);
   }
 

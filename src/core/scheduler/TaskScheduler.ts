@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { ScheduledTask, TaskExecutor } from '../../types';
+import { logger } from '../../utils/Logger';
 
 // node-cron is a pure-JS scheduler, cross-platform (Win/Mac/Linux)
 let cronValidate: (expression: string) => boolean;
@@ -42,7 +43,7 @@ export class TaskScheduler {
 
   async initialize(): Promise<void> {
     await this.loadTasks();
-    console.log(`[TaskScheduler] Initialized with ${this.tasks.size} tasks`);
+    logger.debug('TaskScheduler', `Initialized with ${this.tasks.size} tasks`);
   }
 
   async shutdown(): Promise<void> {
@@ -147,7 +148,7 @@ export class TaskScheduler {
     const task = this.tasks.get(taskId);
     if (!task || !task.enabled || !this.executor) return;
 
-    console.log(`[TaskScheduler] Executing task: ${task.name}`);
+    logger.debug('TaskScheduler', `Executing task: ${task.name}`);
     task.lastRun = Date.now();
     task.runCount++;
 
@@ -165,7 +166,7 @@ export class TaskScheduler {
     try {
       await this.executor.execute(prompt);
     } catch (error) {
-      console.error(`[TaskScheduler] Task execution failed:`, error);
+      logger.error('TaskScheduler', `Task execution failed: ${error}`);
     }
 
     await this.saveTasks();
@@ -197,7 +198,7 @@ export class TaskScheduler {
       };
       await fs.writeFile(this.storagePath, JSON.stringify(data, null, 2), 'utf-8');
     } catch (error) {
-      console.error('[TaskScheduler] Failed to save tasks:', error);
+      logger.error('TaskScheduler', `Failed to save tasks: ${error}`);
     }
   }
 }

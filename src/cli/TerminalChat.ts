@@ -126,7 +126,7 @@ export class TerminalChat {
 
       console.log('[TerminalChat] Generating system prompt...');
       const assembled = await this.promptAssembler.assemble('default', runtimeContext);
-      console.log(`[TerminalChat] System prompt generated, layers: ${Object.entries(assembled.layers).filter(([k,v]) => v).map(([k,v]) => k).join(', ')}`);
+      logger?.debug('TerminalChat', `System prompt generated, layers: ${Object.entries(assembled.layers).filter(([k,v]) => v).map(([k,v]) => k).join(', ')}`);
       
       // 验证关键层是否加载成功
       if (!assembled.layers.L0_AGENTS || !assembled.layers.L1_SOUL) {

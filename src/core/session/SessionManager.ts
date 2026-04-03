@@ -9,6 +9,7 @@ import {
   ConversationMessage,
 } from '../../types';
 import { estimateMessagesTokens } from '../compact/tokens';
+import { logger } from '../../utils/Logger';
 
 /**
  * 会话管理器
@@ -57,7 +58,7 @@ export class SessionManager {
     };
 
     this.sessions.set(session.id, session);
-    console.log(`[SessionManager] Standalone session created: ${session.id}`);
+    logger.debug('SessionManager', `Standalone session created: ${session.id}`);
     return session;
   }
 
@@ -75,7 +76,7 @@ export class SessionManager {
         content: systemPrompt,
         timestamp: Date.now(),
       });
-      console.log('[SessionManager] System prompt injected');
+      logger.debug('SessionManager', 'System prompt injected');
     }
 
     const session: Session = {
@@ -103,7 +104,7 @@ export class SessionManager {
     this.sessions.set(session.id, session);
     this.mainSessionId = session.id;
     
-    console.log(`[SessionManager] Main session created: ${session.id}`);
+    logger.debug('SessionManager', `Main session created: ${session.id}`);
     return session;
   }
 
@@ -225,7 +226,7 @@ export class SessionManager {
       }
     }
 
-    console.log(`[SessionManager] Sub-agent completed: ${sessionId}`);
+    logger.debug('SessionManager', `Sub-agent completed: ${sessionId}`);
   }
 
   /**
@@ -241,7 +242,7 @@ export class SessionManager {
     }
 
     this.sessions.delete(sessionId);
-    console.log(`[SessionManager] Session destroyed: ${sessionId}`);
+    logger.debug('SessionManager', `Session destroyed: ${sessionId}`);
   }
 
   /**
@@ -296,7 +297,7 @@ export class SessionManager {
   private setupTimeout(session: Session): void {
     setTimeout(() => {
       if (session.status === 'active') {
-        console.warn(`[SessionManager] Sub-agent timeout: ${session.id}`);
+        logger.warn('SessionManager', `Sub-agent timeout: ${session.id}`);
         this.completeSubAgent(session.id, { 
           status: 'timeout', 
           error: `Task exceeded timeout of ${session.timeout}s` 

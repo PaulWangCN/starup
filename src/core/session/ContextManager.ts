@@ -4,6 +4,7 @@
  */
 
 import { Session } from '../../types';
+import { logger } from '../../utils/Logger';
 
 /**
  * 跨会话继承状态
@@ -32,7 +33,7 @@ export class ContextManager {
     // 更新创建时间
     state.createdAt = Date.now();
     this.carryStates.set(sessionId, state);
-    console.log(`[ContextManager] Carry state set for session ${sessionId}, intent: ${state.intent}`);
+    logger.debug('ContextManager', `Carry state set for session ${sessionId}, intent: ${state.intent}`);
   }
 
   /**
@@ -50,7 +51,7 @@ export class ContextManager {
     // 检查是否过期
     if (this.isExpired(state)) {
       this.carryStates.delete(sessionId);
-      console.log(`[ContextManager] Carry state expired for session ${sessionId}`);
+      logger.debug('ContextManager', `Carry state expired for session ${sessionId}`);
       return null;
     }
 
@@ -83,7 +84,7 @@ export class ContextManager {
     }
 
     if (cleanedCount > 0) {
-      console.log(`[ContextManager] Cleaned ${cleanedCount} expired carry states`);
+      logger.debug('ContextManager', `Cleaned ${cleanedCount} expired carry states`);
     }
     
     return cleanedCount;
@@ -99,12 +100,12 @@ export class ContextManager {
     const state = this.getCarryState(sessionId);
     
     if (!state) {
-      console.log(`[ContextManager] No carry state found for session ${sessionId}`);
+      logger.debug('ContextManager', `No carry state found for session ${sessionId}`);
       return false;
     }
 
     if (!state.context_carry) {
-      console.log(`[ContextManager] Context carry is disabled for session ${sessionId}`);
+      logger.debug('ContextManager', `Context carry is disabled for session ${sessionId}`);
       return false;
     }
 
@@ -121,9 +122,7 @@ export class ContextManager {
     // 更新会话元数据（如果有的话）
     // 这里可以扩展 Session 类型以支持元数据存储
 
-    console.log(`[ContextManager] Merged carry state from ${sessionId} to session ${targetSession.id}`);
-    console.log(`  - Intent: ${state.intent}`);
-    console.log(`  - Slots: ${Object.keys(state.slots).join(', ')}`);
+    logger.debug('ContextManager', `Merged carry state from ${sessionId} to session ${targetSession.id}, Intent: ${state.intent}, Slots: ${Object.keys(state.slots).join(', ')}`);
     
     return true;
   }
@@ -162,7 +161,7 @@ export class ContextManager {
     const state = this.carryStates.get(sessionId);
     if (state) {
       state.context_carry = false;
-      console.log(`[ContextManager] Context carry disabled for session ${sessionId}`);
+      logger.debug('ContextManager', `Context carry disabled for session ${sessionId}`);
     }
   }
 
@@ -174,7 +173,7 @@ export class ContextManager {
     const state = this.carryStates.get(sessionId);
     if (state) {
       state.context_carry = true;
-      console.log(`[ContextManager] Context carry enabled for session ${sessionId}`);
+      logger.debug('ContextManager', `Context carry enabled for session ${sessionId}`);
     }
   }
 
@@ -203,7 +202,7 @@ export class ContextManager {
     const existed = this.carryStates.has(sessionId);
     if (existed) {
       this.carryStates.delete(sessionId);
-      console.log(`[ContextManager] Carry state deleted for session ${sessionId}`);
+      logger.debug('ContextManager', `Carry state deleted for session ${sessionId}`);
     }
     return existed;
   }
@@ -222,7 +221,7 @@ export class ContextManager {
   clearAllStates(): void {
     const count = this.carryStates.size;
     this.carryStates.clear();
-    console.log(`[ContextManager] Cleared all ${count} carry states`);
+    logger.debug('ContextManager', `Cleared all ${count} carry states`);
   }
 
   /**
@@ -238,7 +237,7 @@ export class ContextManager {
     }
 
     state.ttl += additionalTtl;
-    console.log(`[ContextManager] Extended TTL for session ${sessionId} to ${state.ttl}s`);
+    logger.debug('ContextManager', `Extended TTL for session ${sessionId} to ${state.ttl}s`);
     return true;
   }
 
