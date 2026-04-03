@@ -396,7 +396,6 @@ type: feedback
       '# StarUp AI 系统提示词',
       '',
       `版本：${this.config.version}`,
-      `生成时间：${new Date().toISOString()}`,
       `包含层：${validLayers.map((l) => l.name).join(', ')}`,
       '',
       '---',
