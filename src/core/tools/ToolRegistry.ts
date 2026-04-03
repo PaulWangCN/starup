@@ -152,7 +152,7 @@ export class ToolRegistry {
       handler: async (args) => {
         const task = findTask(args.id_or_name);
         if (!task) {
-          return { success: false, error: `Task not found: ${args.id_or_name}` };
+          return { success: false, error: `未找到任务：${args.id_or_name}` };
         }
         const result = await cancelTask(task.id);
         if (result.success) {

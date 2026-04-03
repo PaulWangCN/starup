@@ -14,7 +14,7 @@ export const createReadTool = (workingDir: string): ToolDefinition => ({
     const filePath = path.resolve(workingDir, args.path);
     const localStarupDir = path.join(workingDir, '.starup');
     if (!filePath.startsWith(workingDir) && !filePath.startsWith(localStarupDir)) {
-      return { success: false, error: 'Access denied: path outside allowed directories' };
+      return { success: false, error: '访问被拒绝：路径超出允许目录' };
     }
     try {
       const content = await fs.readFile(filePath, 'utf-8');

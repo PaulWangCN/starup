@@ -114,35 +114,35 @@ export class MemoryManager {
   getSessionMemoryTemplate(): string {
     return `# Session Memory
 
-## Session Title
-_Brief description of what this session is about_
+## 会话标题
+_本会话主题的简要描述_
 
-## Current State
-_What is the current status of the work_
+## 当前状态
+_工作当前进展状态_
 
-## Task specification
-_Detailed description of the current task requirements_
+## 任务规格
+_当前任务需求的详细描述_
 
-## Files and Functions
-_Key files and functions being worked on_
+## 文件与函数
+_正在处理的关键文件和函数_
 
-## Workflow
-_Steps being followed or processes in use_
+## 工作流程
+_正在遵循的步骤或流程_
 
-## Errors & Corrections
-_Errors encountered and how they were resolved_
+## 错误与修正
+_遇到的错误及解决方式_
 
-## Codebase and System Documentation
-_Important codebase patterns, conventions, and system behavior_
+## 代码库与系统文档
+_重要的代码模式、约定和系统行为_
 
-## Learnings
-_Insights gained during this session_
+## 学习收获
+_本会话中获得的见解_
 
-## Key results
-_Important outputs, measurements, or achievements_
+## 关键成果
+_重要输出、指标或成就_
 
-## Worklog
-_Chronological log of actions taken_
+## 工作日志
+_按时间顺序记录的操作_
 `;
   }
 
@@ -360,7 +360,7 @@ _Chronological log of actions taken_
       indexContent = await fs.readFile(indexPath, 'utf-8');
     } catch {
       // 文件不存在，创建新索引
-      indexContent = '# Memory Index\n\nThis file indexes all persistent memories.\n';
+      indexContent = '# 记忆索引\n\n本文件索引所有持久化记忆。\n';
       for (const t of ['user', 'feedback', 'project', 'reference']) {
         indexContent += `\n## ${t}\n`;
       }
@@ -445,7 +445,7 @@ _Chronological log of actions taken_
       }
       
       content = truncatedLines.join('\n');
-      content += '\n\n> ⚠️ **Index Truncated**: Maximum size limit reached. Some older entries may not be displayed.\n';
+      content += '\n\n> ⚠️ **索引已截断**：已达最大大小限制，部分旧条目未显示。\n';
     }
     
     // 检查行数限制
@@ -453,7 +453,7 @@ _Chronological log of actions taken_
     if (lines.length > this.MAX_ENTRYPOINT_LINES) {
       const truncated = lines.slice(0, this.MAX_ENTRYPOINT_LINES - 3);
       content = truncated.join('\n');
-      content += '\n\n> ⚠️ **Index Truncated**: Maximum line limit reached. Some older entries may not be displayed.\n';
+      content += '\n\n> ⚠️ **索引已截断**：已达最大行数限制，部分旧条目未显示。\n';
     }
     
     return content;
@@ -466,7 +466,7 @@ _Chronological log of actions taken_
     try {
       return await fs.readFile(this.getIndexPath(), 'utf-8');
     } catch (error) {
-      return '# Memory Index\n\nNo memories indexed yet.\n';
+      return '# 记忆索引\n\n暂无记忆条目。\n';
     }
   }
 
@@ -584,35 +584,35 @@ _Chronological log of actions taken_
     memories: ParsedMemory[],
     recentTools?: string[]
   ): { system: string; user: string } {
-    const system = `You are a memory selection assistant. Your task is to select the most relevant memories for the user's query.
+    const system = `你是记忆选择助手。任务：为用户查询选择最相关的记忆。
 
-Rules:
-1. Return at most ${this.MAX_RELEVANT_MEMORIES} filenames
-2. Be selective and discerning - if unsure, do not include
-3. Prioritize recent memories when relevance is similar
-4. If recent tools are provided, do NOT select memories about how to use those tools (user already knows)
-   - But DO select memories about warnings/pitfalls/known issues of those tools
+规则：
+1. 最多返回 ${this.MAX_RELEVANT_MEMORIES} 个文件名
+2. 严格筛选——不确定的不要包含
+3. 相关性相近时优先选较新的记忆
+4. 若提供了最近使用的工具，不要选择关于如何使用这些工具的记忆（用户已知道）
+   - 但要选择关于这些工具的警告/坑点/已知问题的记忆
 
-Respond in this exact format:
+严格按以下格式回复：
 selected_files:
-- path/to/file1.md | reason why relevant
-- path/to/file2.md | reason why relevant
+- path/to/file1.md | 相关原因
+- path/to/file2.md | 相关原因
 
-Or if none are relevant:
+如果没有相关的：
 selected_files: none`;
 
     // 构建记忆列表
     const memoryList = memories.map(m => {
       const relativePath = path.relative(this.memoryDir, m.path);
       const age = this.memoryAgeDays(m.mtime);
-      const ageText = age === 0 ? 'today' : age === 1 ? 'yesterday' : `${age} days ago`;
+      const ageText = age === 0 ? '今天' : age === 1 ? '昨天' : `${age} 天前`;
       return `- [${m.frontmatter.type}] ${relativePath} (${ageText}): ${m.frontmatter.description}`;
     }).join('\n');
 
-    const userParts = [`Query: ${query}`, '', 'Available memories:', memoryList];
+    const userParts = [`查询：${query}`, '', '可用记忆：', memoryList];
     
     if (recentTools && recentTools.length > 0) {
-      userParts.push('', `Recently used tools: ${recentTools.join(', ')}`);
+      userParts.push('', `最近使用的工具：${recentTools.join(', ')}`);
     }
 
     return { system, user: userParts.join('\n') };
@@ -675,7 +675,7 @@ selected_files: none`;
     
     return scored.slice(0, this.MAX_RELEVANT_MEMORIES).map(({ memory }) => ({
       memory,
-      reason: 'Keyword match',
+      reason: '关键词匹配',
       freshness: this.getFreshnessText(memory.mtime),
     }));
   }
@@ -694,14 +694,14 @@ selected_files: none`;
   /**
    * 获取新鲜度文本
    * 
-   * 使用相对时间（X days ago）比 ISO 时间戳更能触发模型的过期推理
+   * 使用相对时间（X 天前）比 ISO 时间戳更能触发模型的过期推理
    */
   getFreshnessText(mtimeMs: number): string {
     const days = this.memoryAgeDays(mtimeMs);
     
-    if (days === 0) return 'today';
-    if (days === 1) return 'yesterday';
-    return `${days} days ago`;
+    if (days === 0) return '今天';
+    if (days === 1) return '昨天';
+    return `${days} 天前`;
   }
 
   /**
@@ -716,7 +716,7 @@ selected_files: none`;
       return '';  // 新鲜记忆不加警告
     }
 
-    return `\n\n⚠️ **Memory Freshness Warning**\nThis memory is from ${days} days ago.\nMemories are point-in-time observations, not live state — claims about code behavior or file:line citations may be outdated. Verify against current code before asserting as fact.`;
+    return `\n\n⚠️ **记忆新鲜度警告**\n此记忆来自 ${days} 天前。\n记忆是 point-in-time 观察，非实时状态——关于代码行为或文件行号的声明可能已过时。断言为事实前请先与当前代码核对。`;
   }
 
   /**
@@ -724,7 +724,7 @@ selected_files: none`;
    */
   formatMemoryContent(memory: ParsedMemory): string {
     const freshness = this.getFreshnessWarning(memory.mtime);
-    return `## ${memory.frontmatter.name}\n**Type:** ${memory.frontmatter.type} | **Updated:** ${this.getFreshnessText(memory.mtime)}\n\n${memory.content}${freshness}`;
+    return `## ${memory.frontmatter.name}\n**类型：**${memory.frontmatter.type} | **更新于：**${this.getFreshnessText(memory.mtime)}\n\n${memory.content}${freshness}`;
   }
 
   // ==================== 记忆注入 ====================

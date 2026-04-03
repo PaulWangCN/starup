@@ -3,85 +3,84 @@
  * 提供两种模式：完整模式(A)和快速模式(B)
  */
 
-export const NO_TOOLS_PREAMBLE = `CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
+export const NO_TOOLS_PREAMBLE = `【关键指令】仅返回文本，禁止调用任何工具。
 
-- Do NOT use Read, Bash, Grep, Glob, Edit, Write, or ANY other tool.
-- You already have all the context you need in the conversation above.
-- Tool calls will be REJECTED and will waste your only turn — you will fail the task.
-- Your entire response must be plain text: an <analysis> block followed by a <summary> block.
+- 禁止使用 Read、Bash、Grep、Glob、Edit、Write 等任何工具
+- 你已拥有对话中的全部上下文
+- 工具调用将被拒绝且浪费回合
+- 必须纯文本输出：<analysis> 分析块 + <summary> 摘要块
 `;
 
 // ========== 模式 A：完整压缩（适合复杂技术项目） ==========
 export const DETAILED_COMPACT_PROMPT = `${NO_TOOLS_PREAMBLE}
 
-Your task is to summarize the conversation so far into a structured summary.
-This summary will replace the earlier messages in the conversation context, so it must be COMPLETE and SELF-CONTAINED.
+任务：将对话历史整理为结构化摘要，用于替换早期消息上下文，必须完整且自包含。
 
-First, write an <analysis> block:
-- Walk through the messages in chronological order.
-- Identify user intents, technical decisions, code patterns, errors and fixes.
-- Pay special attention to user feedback (where the user told you to do something differently).
-- Double-check technical accuracy and completeness.
+首先，撰写 <analysis> 分析块：
+- 按时间顺序梳理消息
+- 识别用户意图、技术决策、代码模式、错误与修复
+- 重点关注用户反馈（用户要求你改的地方）
+- 复核技术准确性和完整性
 
-Then, write a <summary> block with the following sections:
+然后，撰写 <summary> 摘要块，包含以下章节：
 
-1. Primary Request and Intent:
-   [Detailed description of all user requests and intentions]
+1. 主要请求与意图：
+   [用户所有请求和意图的详细描述]
 
-2. Key Technical Concepts:
-   - [Concept 1]
-   - [Concept 2]
+2. 关键技术概念：
+   - [概念1]
+   - [概念2]
 
-3. Files and Code Sections:
-   - [file name]
-     - [why it matters]
-     - [code snippet if relevant]
+3. 文件与代码片段：
+   - [文件名]
+     - [重要性说明]
+     - [相关代码片段]
 
-4. Errors and fixes:
-   - [error description]:
-     - [how it was fixed]
-     - [user feedback]
+4. 错误与修复：
+   - [错误描述]：
+     - [修复方式]
+     - [用户反馈]
 
-5. Problem Solving:
-   [Problem solving process]
+5. 问题解决过程：
+   [问题排查和解决过程]
 
-6. All user messages:
-   - [List all non-tool user messages verbatim or paraphrased]
+6. 所有用户消息：
+   - [列出所有非工具类的用户消息原文或概括]
 
-7. Pending Tasks:
-   - [Pending task 1]
-   - [Pending task 2]
+7. 待办任务：
+   - [待办1]
+   - [待办2]
 
-8. Current Work:
-   [Precise description of current work, including file names and code snippets]
+8. 当前工作：
+   [当前工作的精确描述，含文件名和代码片段]
 
-9. Optional Next Step:
-   [Next planned step, including direct quotes from recent messages]
+9. 下一步（可选）：
+   [计划下一步，可引用最近消息原文]
 
-Remember: the <analysis> block is scratch paper and will be discarded. The <summary> block is what matters.
+注意：<analysis> 是草稿会被丢弃，<summary> 才是关键内容。
 `;
 
 // ========== 模式 B：快速压缩（适合简单场景） ==========
 export const QUICK_COMPACT_PROMPT = `${NO_TOOLS_PREAMBLE}
 
-Summarize the conversation into 4 sections. Be concise but complete.
+将对话概括为4个部分，简洁但完整。
 
-Format:
+格式：
 <summary>
-1. Request: [User's main request in 1-2 sentences]
+1. 请求：[用户主要请求，1-2句话]
 
-2. Files: [List key files with brief context]
+2. 文件：[关键文件列表及简要上下文]
 
-3. Status: [Current progress, decisions made, errors encountered and fixed]
+3. 状态：[当前进度、已做决策、遇到的错误及修复]
 
-4. Next: [What to do next, if clear]
+4. 下一步：[如有明确计划，说明下一步]
 </summary>
 
-Rules:
-- Keep it under 400 words
-- Focus on facts, not process
-- Include file paths and code snippets only if critical
-- Omit tool call details unless they matter
+规则：
+- 控制在400字以内
+- 聚焦事实，而非过程
+- 仅关键时才包含文件路径和代码片段
+- 除非重要，否则省略工具调用细节
 `;
 
 /**
@@ -213,14 +212,14 @@ export function getCompactUserSummaryMessage(
     recentMessagesPreserved?: boolean;
   } = {}
 ): string {
-  let msg = `This session is being continued from a previous conversation that ran out of context.\nThe summary below covers the earlier portion of the conversation.\n\n${formatCompactSummary(summary)}`;
+  let msg = `本会话从之前的对话延续而来（上下文已满）。\n以下摘要涵盖早期对话内容。\n\n${formatCompactSummary(summary)}`;
 
   if (options.recentMessagesPreserved) {
-    msg += `\n\nRecent messages are preserved verbatim.`;
+    msg += `\n\n最近消息已完整保留。`;
   }
 
   if (options.suppressFollowUp) {
-    msg += `\n\nContinue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.`;
+    msg += `\n\n直接继续对话，不要向用户提问。直接恢复任务，不要确认摘要、不要回顾发生了什么、不要用"我继续"等开场白。从中断处无缝继续。`;
   }
 
   return msg;

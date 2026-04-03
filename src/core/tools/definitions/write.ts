@@ -14,7 +14,7 @@ export const createWriteTool = (workingDir: string): ToolDefinition => ({
     const filePath = path.resolve(workingDir, args.path);
     const localStarupDir = path.join(workingDir, '.starup');
     if (!filePath.startsWith(workingDir) && !filePath.startsWith(localStarupDir)) {
-      return { success: false, error: 'Access denied: path outside allowed directories' };
+      return { success: false, error: '访问被拒绝：路径超出允许目录' };
     }
     try {
       await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -25,7 +25,7 @@ export const createWriteTool = (workingDir: string): ToolDefinition => ({
       }
       return { success: true, data: { path: filePath, mode: args.mode } };
     } catch (error) {
-      return { success: false, error: `Failed to write file: ${error}` };
+      return { success: false, error: `写入文件失败：${error}` };
     }
   },
 });

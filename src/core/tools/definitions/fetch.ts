@@ -39,7 +39,7 @@ export const fetchTool: ToolDefinition = {
       } else {
         const text = await response.text();
         const maxLen = 50000;
-        data = text.length > maxLen ? text.substring(0, maxLen) + '\n... (content truncated)' : text;
+        data = text.length > maxLen ? text.substring(0, maxLen) + '\n... （内容已截断）' : text;
       }
       
       return {
@@ -57,9 +57,9 @@ export const fetchTool: ToolDefinition = {
       };
     } catch (error: any) {
       if (error.name === 'AbortError') {
-        return { success: false, error: 'Request timeout' };
+        return { success: false, error: '请求超时' };
       }
-      return { success: false, error: `Request failed: ${error.message}` };
+      return { success: false, error: `请求失败：${error.message}` };
     }
   },
 };

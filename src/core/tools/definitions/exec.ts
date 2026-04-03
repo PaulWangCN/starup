@@ -22,7 +22,7 @@ export const createExecTool = (workingDir: string): ToolDefinition => ({
     ];
     for (const pattern of dangerousPatterns) {
       if (pattern.test(args.command)) {
-        return { success: false, error: 'Dangerous command blocked for security' };
+        return { success: false, error: '危险命令已被安全系统拦截' };
       }
     }
     try {
@@ -55,11 +55,11 @@ export const createExecTool = (workingDir: string): ToolDefinition => ({
       let output = (stdout || '').replace(/^Active code page: \d+\r?\n?/i, '').trim();
       let errOutput = (stderr || '').trim();
       const maxLen = 3000;
-      if (output.length > maxLen) output = output.substring(0, maxLen) + '\n... (output truncated)';
-      if (errOutput.length > maxLen) errOutput = errOutput.substring(0, maxLen) + '\n... (stderr truncated)';
+      if (output.length > maxLen) output = output.substring(0, maxLen) + '\n... （输出已截断）';
+      if (errOutput.length > maxLen) errOutput = errOutput.substring(0, maxLen) + '\n... （错误输出已截断）';
       return {
         success: true,
-        data: { stdout: output || '(no output)', stderr: errOutput || '(no stderr)', exitCode: 0, platform: process.platform },
+        data: { stdout: output || '（无输出）', stderr: errOutput || '（无错误输出）', exitCode: 0, platform: process.platform },
       };
     } catch (error: any) {
       let errorMsg = error.message;
@@ -68,7 +68,7 @@ export const createExecTool = (workingDir: string): ToolDefinition => ({
       stdout = stdout.replace(/^Active code page: \d+\r?\n?/i, '').trim();
       stderr = stderr.replace(/^Active code page: \d+\r?\n?/i, '').trim();
       if (process.platform === 'win32' && error.code === 'ENOENT') {
-        errorMsg = `Command not found. On Windows, try using "dir" instead of "ls", "cd" instead of "pwd"`;
+        errorMsg = `命令未找到。Windows 系统请尝试用 "dir" 替代 "ls"，用 "cd" 替代 "pwd"`;
       }
       return {
         success: false,

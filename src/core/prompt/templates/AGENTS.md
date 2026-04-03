@@ -25,37 +25,37 @@
 **格式**: 10个固定章节
 
 ```markdown
-# Session Memory
+# 会话记忆
 
-## Session Title
-_Brief description of what this session is about_
+## 会话标题
+_本会话主题的简要描述_
 
-## Current State
-_What is the current status of the work_
+## 当前状态
+_工作当前进展状态_
 
-## Task specification
-_Detailed description of the current task requirements_
+## 任务规格
+_当前任务需求的详细描述_
 
-## Files and Functions
-_Key files and functions being worked on_
+## 文件与函数
+_正在处理的关键文件和函数_
 
-## Workflow
-_Steps being followed or processes in use_
+## 工作流程
+_正在遵循的步骤或流程_
 
-## Errors & Corrections
-_Errors encountered and how they were resolved_
+## 错误与修正
+_遇到的错误及解决方式_
 
-## Codebase and System Documentation
-_Important codebase patterns, conventions, and system behavior_
+## 代码库与系统文档
+_重要的代码模式、约定和系统行为_
 
-## Learnings
-_Insights gained during this session_
+## 学习收获
+_本会话中获得的见解_
 
-## Key results
-_Important outputs, measurements, or achievements_
+## 关键成果
+_重要输出、指标或成就_
 
-## Worklog
-_Chronological log of actions taken_
+## 工作日志
+_按时间顺序记录的操作_
 ```
 
 **限制**:
@@ -121,7 +121,7 @@ tags: [tag1, tag2]
 **MEMORY.md 索引格式**:
 
 ```markdown
-# Memory Index
+# 记忆索引
 
 - [记忆名称](feedback/preference.md) — 简短描述（约150字符以内）
 - [项目名称](project/deadline.md) — 2026-04-05 发布冻结
@@ -142,9 +142,9 @@ tags: [tag1, tag2]
 4. 附加新鲜度标注
 
 **新鲜度标注**:
-- `today` / `yesterday` / `N days ago`
+- `今天` / `昨天` / `N 天前`
 - 超过 1 天的记忆会附加警告：
-  > Memories are point-in-time observations, not live state — claims about code behavior or file:line citations may be outdated.
+  > 记忆是 point-in-time 观察，非实时状态——关于代码行为或文件行号的声明可能已过时。
 
 ### 使用前验证（重要）
 

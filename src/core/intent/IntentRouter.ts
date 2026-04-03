@@ -51,10 +51,10 @@ export class IntentRouter {
       };
     }
 
-    const prompt = `对用户消息分类，只输出JSON：
+    const prompt = `对用户消息分类，只输出 JSON：
 {"intent_id":"general_chat|use_skill|code_help|memory_query","confidence":0.0-1.0,"skill_hint":""}
 规则：
-- use_skill：搜索、查天气、翻译、画图、计算等需用skill完成的任务
+- use_skill：搜索、查天气、翻译、画图、计算等需用 skill 完成的任务
 - code_help：写代码、review、debug、解释代码
 - memory_query：问之前聊过的内容
 - general_chat：其他闲聊
@@ -67,7 +67,7 @@ export class IntentRouter {
       try {
         const response = await this.llmService.chat(
           [
-            { role: 'system', content: '意图分类器', timestamp: Date.now() },
+            { role: 'system', content: '意图分类助手', timestamp: Date.now() },
             { role: 'user', content: prompt, timestamp: Date.now() },
           ],
           []

@@ -22,7 +22,7 @@ export const createGrepTool = (workingDir: string): ToolDefinition => ({
       const localStarupDir = path.join(workingDir, '.starup');
       
       if (!searchPath.startsWith(workingDir) && !searchPath.startsWith(localStarupDir)) {
-        return { success: false, error: 'Access denied: path outside allowed directories' };
+        return { success: false, error: '访问被拒绝：路径超出允许目录' };
       }
 
       const pattern = args.pattern;
@@ -88,7 +88,7 @@ export const createGrepTool = (workingDir: string): ToolDefinition => ({
         const flags = ['g', ignoreCase ? 'i' : '', multiline ? 'm' : ''].join('');
         regex = new RegExp(pattern, flags);
       } catch (e) {
-        return { success: false, error: `Invalid regex pattern: ${e}` };
+        return { success: false, error: `无效的正则表达式：${e}` };
       }
 
       interface Match {
@@ -169,7 +169,7 @@ export const createGrepTool = (workingDir: string): ToolDefinition => ({
         },
       };
     } catch (error: any) {
-      return { success: false, error: `Grep failed: ${error.message}` };
+      return { success: false, error: `搜索失败：${error.message}` };
     }
   },
 });

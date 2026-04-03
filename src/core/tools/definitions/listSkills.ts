@@ -48,7 +48,7 @@ export const listSkillsTool: ToolDefinition = {
         },
       };
     } catch (error: any) {
-      return { success: false, error: `Failed to list skills: ${error.message}` };
+      return { success: false, error: `列出 skills 失败：${error.message}` };
     }
   },
 };

@@ -67,7 +67,7 @@ export const webFetchTool: ToolDefinition = {
       
       const truncated = content.length > maxChars;
       if (truncated) {
-        content = content.substring(0, maxChars) + '\n... (content truncated)';
+        content = content.substring(0, maxChars) + '\n... （内容已截断）';
       }
       
       return {
@@ -82,9 +82,9 @@ export const webFetchTool: ToolDefinition = {
       };
     } catch (error: any) {
       if (error.name === 'AbortError') {
-        return { success: false, error: 'Request timeout' };
+        return { success: false, error: '请求超时' };
       }
-      return { success: false, error: `Failed to fetch webpage: ${error.message}` };
+      return { success: false, error: `获取网页失败：${error.message}` };
     }
   },
 };

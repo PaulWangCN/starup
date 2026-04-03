@@ -16,7 +16,7 @@ export const createEditTool = (workingDir: string): ToolDefinition => ({
     try {
       const content = await fs.readFile(filePath, 'utf-8');
       if (!content.includes(args.old)) {
-        return { success: false, error: 'Old text not found in file' };
+        return { success: false, error: '文件中未找到旧文本' };
       }
       let newContent: string;
       if (args.replace_all) {
@@ -30,7 +30,7 @@ export const createEditTool = (workingDir: string): ToolDefinition => ({
         data: { path: filePath, replacements: args.replace_all ? content.split(args.old).length - 1 : 1 },
       };
     } catch (error) {
-      return { success: false, error: `Failed to edit file: ${error}` };
+      return { success: false, error: `编辑文件失败：${error}` };
     }
   },
 });

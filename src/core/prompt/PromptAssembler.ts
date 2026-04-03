@@ -222,12 +222,12 @@ export class PromptAssembler {
     const content = [
       '# 可用工具列表',
       '',
-      '你可以使用以下工具来帮助用户完成任务：',
+      '可使用以下工具帮助用户完成任务：',
       '',
       ...toolSchemas.map((tool, index) => [
         `## ${index + 1}. ${tool.name}`,
-        `描述: ${tool.description}`,
-        '参数:',
+        `描述：${tool.description}`,
+        '参数：',
         '```json',
         JSON.stringify(tool.parameters, null, 2),
         '```',
@@ -271,7 +271,7 @@ export class PromptAssembler {
     } catch {
       lines.push('---');
       lines.push('');
-      lines.push('_当前没有用户安装的 skills。需要时可以使用 clawhub skill 搜索安装。_');
+      lines.push('_当前没有用户安装的 skills。需要时可用 clawhub skill 搜索安装。_');
     }
 
     return this.wrapLayer('SKILLS', lines.join('\n'));
@@ -283,15 +283,15 @@ export class PromptAssembler {
       '# 运行时上下文',
       '',
       '## 时间信息',
-      `- 当前时间: ${date.toISOString()}`,
-      `- 时区: ${context.timezone || 'UTC'}`,
-      `- 本地时间: ${date.toLocaleString()}`,
+      `- 当前时间：${date.toISOString()}`,
+      `- 时区：${context.timezone || 'UTC'}`,
+      `- 本地时间：${date.toLocaleString()}`,
       '',
       '## 系统状态',
-      `- 状态: ${context.systemStatus}`,
-      `- 活跃会话数: ${context.activeSessions}`,
-      `- 内存使用: ${Math.round(context.memoryUsage.used / 1024 / 1024)}MB / ${Math.round(context.memoryUsage.total / 1024 / 1024)}MB`,
-      `- 请求ID: ${context.requestId}`,
+      `- 状态：${context.systemStatus}`,
+      `- 活跃会话数：${context.activeSessions}`,
+      `- 内存使用：${Math.round(context.memoryUsage.used / 1024 / 1024)}MB / ${Math.round(context.memoryUsage.total / 1024 / 1024)}MB`,
+      `- 请求ID：${context.requestId}`,
     ].join('\n');
 
     return this.wrapLayer('RUNTIME_CONTEXT', content);
@@ -310,7 +310,7 @@ export class PromptAssembler {
     const content = `
 # 记忆系统使用指南
 
-你有一个持久的文件式记忆系统，位于 \`./.starup/memory/\`。
+你有一个持久化文件式记忆系统，位于 \`./.starup/memory/\`。
 
 ## 记忆类型
 
@@ -322,8 +322,8 @@ export class PromptAssembler {
 | reference | 外部系统指针 | 了解到 Linear/Grafana/Slack 等资源时 | 通常团队 |
 
 **feedback 和 project 类型必须包含：**
-- **Why:** 为什么这个信息重要
-- **How to apply:** 如何在实际工作中应用
+- **Why：** 为什么这个信息重要
+- **How to apply：** 如何在实际工作中应用
 
 ## 明确不保存的内容
 
@@ -348,8 +348,8 @@ type: feedback
 
 不要在回复末尾总结刚做了什么，用户能看到 diff。
 
-**Why:** 用户明确要求过"stop summarizing what you just did"
-**How to apply:** 所有回复结束时，直接结束，不加回顾性总结。
+**Why：** 用户明确要求过"不要总结你刚做了什么"
+**How to apply：** 所有回复结束时，直接结束，不加回顾性总结。
 \`\`\`
 
 ## 使用记忆前的验证要求
@@ -368,10 +368,10 @@ type: feedback
 
 记忆可能附带新鲜度警告：
 
-> ⚠️ This memory is from N days ago. Memories are point-in-time observations...
+> ⚠️ 此记忆来自 N 天前。记忆是 point-in-time 观察...
 
-- **今天/yesterday** —— 高度可信，但仍建议验证关键信息
-- **N days ago** —— 需要验证，代码和文件可能已经变化
+- **今天/昨天** —— 高度可信，但仍建议验证关键信息
+- **N 天前** —— 需要验证，代码和文件可能已经变化
 - **缺失警告** —— 记忆可能来自当前会话，但仍需遵循验证原则
 
 ## 搜索过去上下文
@@ -395,9 +395,9 @@ type: feedback
     const header = [
       '# StarUp AI 系统提示词',
       '',
-      `版本: ${this.config.version}`,
-      `生成时间: ${new Date().toISOString()}`,
-      `包含层: ${validLayers.map((l) => l.name).join(', ')}`,
+      `版本：${this.config.version}`,
+      `生成时间：${new Date().toISOString()}`,
+      `包含层：${validLayers.map((l) => l.name).join(', ')}`,
       '',
       '---',
       '',
@@ -475,7 +475,7 @@ type: feedback
     for (const layer of layers) {
       if (currentTokens <= threshold) break;
       if (layer.priority >= 3) continue;
-      result = result.replace(layer.content, `<!-- ${layer.name} truncated -->`);
+      result = result.replace(layer.content, `<!-- ${layer.name} 已截断 -->`);
       currentTokens = this.estimateTokens(result);
     }
     return result;
