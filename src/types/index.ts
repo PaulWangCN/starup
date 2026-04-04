@@ -448,8 +448,18 @@ export interface HeartbeatTask {
 
 // ==================== LLM 配置 ====================
 
+export type LLMProvider = 
+  | 'deepseek' 
+  | 'openai' 
+  | 'anthropic' 
+  | 'google' 
+  | 'alibaba' 
+  | 'moonshot' 
+  | 'baichuan'
+  | 'ollama';
+
 export interface LLMConfig {
-  provider: 'deepseek' | 'openai' | 'anthropic' | 'ollama';
+  provider: LLMProvider;
   apiKey: string;
   baseUrl?: string;
   model: string;

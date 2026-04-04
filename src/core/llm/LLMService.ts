@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { LLMConfig, ConversationMessage } from '../../types';
-import { logger } from '../../utils/Logger';
+import { logger, safeStringify } from '../../utils/Logger';
 
 /**
  * LLM 服务
@@ -91,12 +91,42 @@ export class LLMService {
         tool_calls: choice.message.tool_calls,
       };
     } catch (error: any) {
-      const errorDetail = error.response?.data 
-        ? JSON.stringify(error.response.data, null, 2) 
-        : error.message;
+      const errorDetail = this.extractErrorDetail(error);
       logger.error('LLMService', `DeepSeek API error: ${errorDetail}`);
       throw new Error(`DeepSeek API error: ${errorDetail}`);
     }
+  }
+
+  /**
+   * 提取精简的错误信息
+   */
+  private extractErrorDetail(error: any): string {
+    if (error.response) {
+      // HTTP 错误响应
+      const status = error.response.status;
+      const statusText = error.response.statusText;
+      
+      // 尝试提取响应数据中的错误信息
+      let dataError = '';
+      if (error.response.data) {
+        if (typeof error.response.data === 'string') {
+          dataError = error.response.data;
+        } else if (error.response.data.error) {
+          dataError = typeof error.response.data.error === 'string' 
+            ? error.response.data.error 
+            : error.response.data.error.message || JSON.stringify(error.response.data.error);
+        } else if (error.response.data.message) {
+          dataError = error.response.data.message;
+        }
+      }
+      
+      return dataError 
+        ? `HTTP ${status} ${statusText}: ${dataError}`
+        : `HTTP ${status} ${statusText}`;
+    }
+    
+    // 网络错误或其他
+    return error.message || String(error);
   }
 
   /**
@@ -125,9 +155,7 @@ export class LLMService {
         tool_calls: choice.message.tool_calls,
       };
     } catch (error: any) {
-      const errorDetail = error.response?.data 
-        ? JSON.stringify(error.response.data, null, 2) 
-        : error.message;
+      const errorDetail = this.extractErrorDetail(error);
       logger.error('LLMService', `OpenAI API error: ${errorDetail}`);
       throw new Error(`OpenAI API error: ${errorDetail}`);
     }
@@ -225,9 +253,7 @@ export class LLMService {
         content: response.data.message?.content || '',
       };
     } catch (error: any) {
-      const errorDetail = error.response?.data
-        ? (typeof error.response.data === 'string' ? error.response.data : JSON.stringify(error.response.data))
-        : error.message;
+      const errorDetail = this.extractErrorDetail(error);
       logger.error('LLMService', `Ollama API error: ${errorDetail}`);
       throw new Error(`Ollama API error: ${errorDetail}`);
     }
@@ -320,9 +346,7 @@ export class LLMService {
         });
       });
     } catch (error: any) {
-      const errorDetail = error.response?.data
-        ? (typeof error.response.data === 'string' ? error.response.data : JSON.stringify(error.response.data))
-        : error.message;
+      const errorDetail = this.extractErrorDetail(error);
       logger.error('LLMService', `Ollama Stream API error: ${errorDetail}`);
       throw new Error(`Ollama Stream API error: ${errorDetail}`);
     }
@@ -457,9 +481,7 @@ export class LLMService {
         });
       });
     } catch (error: any) {
-      const errorDetail = error.response?.data 
-        ? JSON.stringify(error.response.data, null, 2) 
-        : error.message;
+      const errorDetail = this.extractErrorDetail(error);
       logger.error('LLMService', `Stream API error: ${errorDetail}`);
       throw new Error(`Stream API error: ${errorDetail}`);
     }

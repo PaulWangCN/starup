@@ -9,7 +9,7 @@ import {
   ConversationMessage,
 } from '../../types';
 import { estimateMessagesTokens } from '../compact/tokens';
-import { logger } from '../../utils/Logger';
+import { logger, safeStringify } from '../../utils/Logger';
 
 /**
  * 会话管理器
@@ -220,7 +220,7 @@ export class SessionManager {
       if (parent) {
         this.addMessage(parent.id, {
           role: 'system',
-          content: `Sub-agent (${sessionId}) completed. Result: ${JSON.stringify(result)}`,
+          content: `Sub-agent (${sessionId}) completed. Result: ${safeStringify(result)}`,
           timestamp: Date.now(),
         });
       }

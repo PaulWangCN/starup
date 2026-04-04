@@ -6,7 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Session, ConversationMessage } from '../../types';
-import { logger } from '../../utils/Logger';
+import { logger, safeStringify } from '../../utils/Logger';
 
 /**
  * 实体信息
@@ -419,7 +419,7 @@ export class SessionSnapshotManager {
     const filename = `${snapshot.sessionId}_${snapshot.timestamp}.json`;
     const filepath = path.join(this.snapshotDir, filename);
     
-    await fs.promises.writeFile(filepath, JSON.stringify(snapshot, null, 2), 'utf-8');
+    await fs.promises.writeFile(filepath, safeStringify(snapshot, 2), 'utf-8');
   }
 
   /**

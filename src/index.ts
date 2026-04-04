@@ -13,6 +13,9 @@ import { skillRegistry } from './core/skills/SkillRegistry';
 import { LLMService } from './core/llm/LLMService';
 import { TaskScheduler, taskScheduler } from './core/scheduler/TaskScheduler';
 import { sessionSnapshotManager } from './core/session/SessionSnapshot';
+import { sessionPersistence } from './core/persistence/SessionPersistence';
+import { selfHealing } from './core/resilience/SelfHealing';
+import { kairosEngine, KairosEngine } from './core/kairos/KairosEngine';
 import {
   applyMicroCompact,
   autoCompactIfNeeded,
@@ -27,9 +30,38 @@ export * from './core/memory/MemoryManager';
 export * from './core/tools/ToolRegistry';
 export * from './core/skills';
 export * from './core/llm/LLMService';
+export { 
+  BaseLLMProvider, 
+  OpenAICompatibleProvider, 
+  AnthropicProvider,
+  GoogleProvider,
+  AlibabaProvider,
+  OllamaProvider,
+  createLLMProvider,
+  getModelCapabilities,
+  SUPPORTED_MODELS,
+  LLMResponse,
+  LLMStreamCallbacks
+} from './core/llm/LLMProviders';
+export { 
+  ModelRouter, 
+  modelRouter,
+  TaskType,
+  RoutingStrategy,
+  ModelSelection
+} from './core/llm/ModelRouter';
 export * from './core/scheduler/TaskScheduler';
 export * from './core/prompt';
 export * from './core/intent';
+export { StarUpDatabase, SessionRecord, SessionSnapshot as DBSessionSnapshot, PendingTask, SystemState, starupDB } from './core/persistence/Database';
+export { SessionPersistence, PersistedSession, sessionPersistence } from './core/persistence/SessionPersistence';
+export * from './core/resilience/SelfHealing';
+export * from './core/kairos/KairosEngine';
+export * from './core/orchestration/AgentTeam';
+export * from './core/lsp/LSPClient';
+export * from './core/codeReview/CodeReviewer';
+export * from './core/project/ProjectUnderstanding';
+// export * from './ui';  // UI 模块需要在单独的 React 构建流程中处理
 
 export interface ProcessMessageCallbacks {
   onThinking?: (content: string) => void;
@@ -49,9 +81,11 @@ export class StarUpCore {
   skillRegistry: typeof skillRegistry;
   llmService: LLMService | null = null;
   scheduler: TaskScheduler;
+  kairosEngine: KairosEngine;
   onScheduledTaskComplete?: (content: string) => void;
   private config: SystemConfig;
   private systemPrompt: string | null = null;
+  private selfHealingEnabled: boolean = true;
 
   constructor(config?: Partial<SystemConfig>) {
     this.sessionManager = sessionManager;
@@ -59,6 +93,7 @@ export class StarUpCore {
     this.toolRegistry = toolRegistry;
     this.skillRegistry = skillRegistry;
     this.scheduler = taskScheduler;
+    this.kairosEngine = kairosEngine;
 
     const llmProvider = (process.env.LLM_PROVIDER as any) || 'deepseek';
     
@@ -157,6 +192,15 @@ export class StarUpCore {
 
     // 加载并启动已持久化的定时任务
     await this.scheduler.initialize();
+    
+    // 初始化自我恢复系统
+    if (this.selfHealingEnabled) {
+      await selfHealing.initialize();
+      selfHealing.onRecovery((action) => {
+        logger.info('StarUpCore', `Self-healing action: ${action.type} - ${action.reason}`);
+      });
+      logger.info('StarUpCore', 'Self-healing system enabled');
+    }
     
     logger.info('StarUpCore', 'Initialization complete');
   }
@@ -497,7 +541,7 @@ export class StarUpCore {
 
         this.sessionManager.addMessage(sessionId, {
           role: 'tool',
-          content: JSON.stringify(result),
+          content: this.safeStringify(result),
           tool_call_id: toolCall.id,
           timestamp: Date.now(),
         });
@@ -545,9 +589,74 @@ export class StarUpCore {
 
   async shutdown(): Promise<void> {
     logger.info('StarUpCore', 'Shutting down...');
+    
+    // 停止 KAIROS 引擎
+    await this.kairosEngine.stop();
+    
+    // 停止自我恢复系统
+    if (this.selfHealingEnabled) {
+      await selfHealing.shutdown();
+    }
+    
     await this.scheduler.shutdown();
     this.skillRegistry.stopAutoScan();
     logger.info('StarUpCore', 'Shutdown complete');
+  }
+
+  /**
+   * 启动 KAIROS 始终在线模式
+   */
+  async startKairosMode(): Promise<void> {
+    await this.kairosEngine.start(this);
+    logger.info('StarUpCore', 'KAIROS mode started');
+  }
+
+  /**
+   * 停止 KAIROS 模式
+   */
+  async stopKairosMode(): Promise<void> {
+    await this.kairosEngine.stop();
+    logger.info('StarUpCore', 'KAIROS mode stopped');
+  }
+
+  /**
+   * 安全 JSON 序列化（处理循环引用）
+   */
+  private safeStringify(obj: any): string {
+    try {
+      return JSON.stringify(obj);
+    } catch (e) {
+      const seen = new WeakSet();
+      return JSON.stringify(obj, (key, value) => {
+        if (typeof value === 'object' && value !== null) {
+          if (seen.has(value)) {
+            return '[Circular]';
+          }
+          seen.add(value);
+        }
+        if (value instanceof Error) {
+          return { name: value.name, message: value.message };
+        }
+        return value;
+      });
+    }
+  }
+
+  /**
+   * 注册会话进行持久化
+   */
+  registerSession(sessionId: string): void {
+    const session = this.sessionManager.getSession(sessionId);
+    if (session) {
+      sessionPersistence.registerSession(session);
+    }
+  }
+
+  /**
+   * 取消注册会话
+   */
+  unregisterSession(sessionId: string): void {
+    sessionPersistence.unregisterSession(sessionId);
   }
 
   /**

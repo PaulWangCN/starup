@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import { safeStringify } from '../utils/Logger';
 
 /**
  * 终端渲染器
@@ -60,7 +61,7 @@ export class Renderer {
    */
   toolStart(name: string, args: any): void {
     console.log(this.colors.tool(`  → 调用工具: ${name}`));
-    console.log(this.colors.tool(`  → 参数: ${JSON.stringify(args, null, 2).split('\n').join('\n     ')}`));
+    console.log(this.colors.tool(`  → 参数: ${safeStringify(args, 2).split('\n').join('\n     ')}`));
   }
 
   /**
