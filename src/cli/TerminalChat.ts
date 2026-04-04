@@ -226,6 +226,19 @@ export class TerminalChat {
         this.showHistory(parseInt(args[0]) || 10);
         return true;
 
+      case 'agents':
+      case 'team':
+        await this.showAgentTeamStatus();
+        return true;
+
+      case 'analyze':
+        if (args.length === 0) {
+          this.renderer.error('用法: /analyze <任务描述> - 分析任务复杂度');
+        } else {
+          await this.analyzeTaskComplexity(args.join(' '));
+        }
+        return true;
+
       default:
         this.renderer.error(`未知命令: ${cmd}`);
         return true;
@@ -365,8 +378,13 @@ export class TerminalChat {
   /skills         列出已加载的 Skills
   /tools          列出可用工具
   /tasks          列出定时任务
+  /clear          清空屏幕
+  /history [n]    显示最近 n 条对话历史 (默认 10)
+  /agents, /team  显示 Agent Team 状态
+  /analyze <任务> 分析任务复杂度
 
 直接输入消息与 AI 对话。
+复杂任务将自动组建 Agent Team 协作处理。
 `);
   }
 
@@ -473,10 +491,97 @@ export class TerminalChat {
   }
 
   /**
+   * 显示 Agent Team 状态
+   */
+  private async showAgentTeamStatus(): Promise<void> {
+    if (!this.core.agentOrchestrator) {
+      console.log('\n❌ Agent Team 功能未启用（LLM 未配置）');
+      return;
+    }
+
+    const missions = this.core.agentOrchestrator.getActiveMissions();
+    
+    console.log(`\n${chalk.bold('🤖 Agent Team 状态')}`);
+    console.log(chalk.gray('─'.repeat(50)));
+    
+    if (missions.length === 0) {
+      console.log('当前没有正在执行的 Agent Team 任务。');
+    } else {
+      console.log(`正在执行的任务: ${missions.length} 个\n`);
+      
+      for (const mission of missions) {
+        console.log(chalk.cyan(`📋 任务: ${mission.id}`));
+        console.log(`   状态: ${mission.status}`);
+        console.log(`   复杂度: ${mission.complexity.level} (${mission.complexity.score}/100)`);
+        console.log(`   子任务: ${mission.subtasks?.length || 0} 个`);
+        console.log(`   Agent 数: ${mission.agents?.size || 0} 个`);
+        
+        if (mission.agents && mission.agents.size > 0) {
+          console.log('   参与的 Agent:');
+          for (const [_, agent] of mission.agents) {
+            const status = agent.status === 'working' ? '⏳' : agent.status === 'idle' ? '⏸️' : '✅';
+            console.log(`      ${status} ${agent.name} (${agent.role})`);
+          }
+        }
+        
+        console.log();
+      }
+    }
+    
+    console.log(chalk.gray('提示: Agent Team 会在处理复杂任务时自动组建'));
+    console.log(chalk.gray('使用 /analyze <任务> 分析任务复杂度'));
+    console.log(chalk.gray('─'.repeat(50)));
+    console.log();
+  }
+
+  /**
+   * 分析任务复杂度
+   */
+  private async analyzeTaskComplexity(task: string): Promise<void> {
+    if (!this.core.agentOrchestrator) {
+      console.log('\n❌ Agent Team 功能未启用（LLM 未配置）');
+      return;
+    }
+
+    console.log('\n🔍 正在分析任务复杂度...');
+    
+    try {
+      const complexity = await this.core.agentOrchestrator.analyzeComplexity(task);
+      
+      console.log(`\n${chalk.bold('📊 复杂度分析报告')}`);
+      console.log(chalk.gray('─'.repeat(50)));
+      console.log(`任务: ${task.substring(0, 50)}${task.length > 50 ? '...' : ''}`);
+      console.log(`复杂度等级: ${chalk.cyan(complexity.level)} (${complexity.score}/100)`);
+      console.log(`建议团队规模: ${complexity.suggestedTeamSize} 人`);
+      console.log(`预计耗时: ${complexity.estimatedDuration}`);
+      console.log(`可并行化: ${complexity.canParallelize ? '✅ 是' : '❌ 否'}`);
+      
+      if (complexity.reasons.length > 0) {
+        console.log('\n分析原因:');
+        complexity.reasons.forEach((reason, i) => {
+          console.log(`  ${i + 1}. ${reason}`);
+        });
+      }
+      
+      if (complexity.suggestedRoles.length > 0) {
+        console.log(`\n建议角色: ${complexity.suggestedRoles.join(', ')}`);
+      }
+      
+      const willUseTeam = this.core.agentOrchestrator.shouldUseAgentTeam(complexity);
+      console.log(`\n${willUseTeam ? chalk.green('✅ 将自动组建 Agent Team 处理') : chalk.yellow('⚡ 将直接处理（复杂度较低）')}`);
+      
+      console.log(chalk.gray('─'.repeat(50)));
+      console.log();
+    } catch (error) {
+      this.renderer.error(`分析失败: ${error}`);
+    }
+  }
+
+  /**
    * 自动补全
    */
   private completer(line: string): [string[], string] {
-    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools', '/tasks', '/clear', '/history'];
+    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools', '/tasks', '/clear', '/history', '/agents', '/team', '/analyze'];
     const hits = completions.filter((c) => c.startsWith(line));
     return [hits.length ? hits : completions, line];
   }

@@ -16,6 +16,7 @@ import { sessionSnapshotManager } from './core/session/SessionSnapshot';
 import { sessionPersistence } from './core/persistence/SessionPersistence';
 import { selfHealing } from './core/resilience/SelfHealing';
 import { kairosEngine, KairosEngine } from './core/kairos/KairosEngine';
+import { DynamicAgentOrchestrator } from './core/agentic/DynamicAgentOrchestrator';
 import {
   applyMicroCompact,
   autoCompactIfNeeded,
@@ -82,10 +83,12 @@ export class StarUpCore {
   llmService: LLMService | null = null;
   scheduler: TaskScheduler;
   kairosEngine: KairosEngine;
+  agentOrchestrator: DynamicAgentOrchestrator | null = null;
   onScheduledTaskComplete?: (content: string) => void;
   private config: SystemConfig;
   private systemPrompt: string | null = null;
   private selfHealingEnabled: boolean = true;
+  private useAgentTeam: boolean = true; // 是否启用 Agent Team
 
   constructor(config?: Partial<SystemConfig>) {
     this.sessionManager = sessionManager;
@@ -124,6 +127,14 @@ export class StarUpCore {
     // 创建 LLM 服务（Ollama 不需要 API Key）
     if (this.config.llm.apiKey || this.config.llm.provider === 'ollama') {
       this.llmService = new LLMService(this.config.llm);
+      
+      // 创建动态 Agent Team 编排器
+      this.agentOrchestrator = new DynamicAgentOrchestrator(
+        this.llmService,
+        this.toolRegistry,
+        this.sessionManager,
+        this.config.llm
+      );
     }
   }
 
@@ -360,6 +371,45 @@ export class StarUpCore {
 
     if (!this.llmService) {
       return { thinking: [], finalReply: 'LLM service not configured' };
+    }
+
+    // ==================== 动态 Agent Team 处理 ====================
+    if (this.useAgentTeam && this.agentOrchestrator) {
+      try {
+        // 分析任务复杂度
+        const complexity = await this.agentOrchestrator.analyzeComplexity(message);
+        
+        if (this.agentOrchestrator.shouldUseAgentTeam(complexity)) {
+          logger.info('StarUpCore', `Task complexity: ${complexity.level} (${complexity.score}/100), using Agent Team`);
+          
+          // 使用 Agent Team 执行复杂任务
+          const { result, mission, usedTeam } = await this.agentOrchestrator.executeWithTeam(
+            message,
+            session.context.messages.slice(-5) // 传递最近 5 条消息作为上下文
+          );
+
+          if (usedTeam && mission) {
+            // 构建 Agent Team 执行报告
+            const agentTeamReport = this.buildAgentTeamReport(mission);
+            
+            this.sessionManager.addMessage(sessionId, {
+              role: 'assistant',
+              content: agentTeamReport,
+              timestamp: Date.now(),
+            });
+            
+            return { 
+              thinking: [`Agent Team 协作完成：${mission.subtasks.length} 个子任务`], 
+              finalReply: agentTeamReport 
+            };
+          }
+        } else {
+          logger.debug('StarUpCore', `Task complexity: ${complexity.level} (${complexity.score}/100), using direct execution`);
+        }
+      } catch (error) {
+        logger.error('StarUpCore', `Agent Team execution failed: ${error}, falling back to normal`);
+        // 降级为普通处理
+      }
     }
 
     // 注入相关记忆到当前会话上下文
@@ -640,6 +690,66 @@ export class StarUpCore {
         return value;
       });
     }
+  }
+
+  /**
+   * 构建 Agent Team 执行报告
+   */
+  private buildAgentTeamReport(mission: any): string {
+    type AgentInfo = { id: string; name: string; role: string };
+    type TaskInfo = { id: string; description: string; status: string; assignedAgentId?: string };
+    
+    const agents: AgentInfo[] = Array.from(mission.agents?.values?.() || mission.agents || []);
+    const subtasks: TaskInfo[] = mission.subtasks || [];
+    const completedTasks = subtasks.filter((t: TaskInfo) => t.status === 'completed');
+    const failedTasks = subtasks.filter((t: TaskInfo) => t.status === 'failed');
+    
+    const duration = mission.completedAt && mission.startedAt 
+      ? `${((mission.completedAt - mission.startedAt) / 1000).toFixed(1)}s`
+      : 'N/A';
+
+    let report = `## 🤖 Agent Team 协作报告\n\n`;
+    report += `**任务复杂度**: ${mission.complexity?.level} (${mission.complexity?.score}/100)\n`;
+    report += `**执行时间**: ${duration}\n`;
+    report += `**参与 Agent**: ${agents.length} 个\n`;
+    report += `**子任务**: ${mission.subtasks?.length || 0} 个 (完成: ${completedTasks.length}, 失败: ${failedTasks.length})\n\n`;
+    
+    if (agents.length > 0) {
+      report += `### 👥 参与的 Agent\n\n`;
+      for (const agent of agents) {
+        report += `- **${agent.name}** (${agent.role})\n`;
+      }
+      report += '\n';
+    }
+    
+    if (completedTasks.length > 0) {
+      report += `### ✅ 完成的任务\n\n`;
+      for (const task of completedTasks) {
+        const agent = agents.find((a: any) => a.id === task.assignedAgentId);
+        report += `- ${task.description} (${agent?.name || 'Unknown'})\n`;
+      }
+      report += '\n';
+    }
+    
+    if (failedTasks.length > 0) {
+      report += `### ❌ 失败的任务\n\n`;
+      for (const task of failedTasks) {
+        report += `- ${task.description}\n`;
+      }
+      report += '\n';
+    }
+    
+    report += `### 📋 最终结果\n\n`;
+    
+    if (mission.finalResult?.mergedContent) {
+      report += mission.finalResult.mergedContent;
+    } else if (mission.finalResult?.content) {
+      report += mission.finalResult.content;
+    } else {
+      report += JSON.stringify(mission.finalResult, null, 2);
+    }
+    
+    return report;
   }
 
   /**
