@@ -9,7 +9,8 @@
     "start": "node dist/index.js",
     "gateway": "ts-node src/gatewayServer.ts",
     "gateway:prod": "node dist/gatewayServer.js",
-    "chat": "ts-node src/cli.ts",
+    "chat": "ts-node src/cli/EnhancedChat.ts",
+    "chat:legacy": "ts-node src/cli.ts",
     "test": "jest"
   },
   "keywords": [
@@ -30,6 +31,7 @@
     "@types/ws": "^8.18.1",
     "axios": "^1.8.4",
     "better-sqlite3": "^12.8.0",
+    "boxen": "^7.0.0",
     "chalk": "^4.1.2",
     "clawhub": "^0.9.0",
     "dingtalk-stream": "^2.1.6-beta.1",
