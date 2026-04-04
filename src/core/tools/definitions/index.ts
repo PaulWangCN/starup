@@ -6,3 +6,4 @@ export { createWriteTool } from './write';
 export { createEditTool } from './edit';
 export { createExecTool } from './exec';
 export { createGrepTool } from './grep';
+export { projectUnderstandTool } from './projectUnderstand';

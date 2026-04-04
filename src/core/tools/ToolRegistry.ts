@@ -10,6 +10,7 @@ import {
   createEditTool,
   createExecTool,
   createGrepTool,
+  projectUnderstandTool,
 } from './definitions';
 
 /**
@@ -177,6 +178,7 @@ export class ToolRegistry {
     this.register(createEditTool(this.workingDir), 'core');
     this.register(createExecTool(this.workingDir), 'core');
     this.register(createGrepTool(this.workingDir), 'core');
+    this.register(projectUnderstandTool, 'core');
   }
 
   private convertParameters(parameters: any[]): Record<string, any> {

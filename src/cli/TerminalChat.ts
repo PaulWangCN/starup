@@ -239,6 +239,10 @@ export class TerminalChat {
         }
         return true;
 
+      case 'project':
+        await this.showProjectUnderstanding();
+        return true;
+
       default:
         this.renderer.error(`未知命令: ${cmd}`);
         return true;
@@ -382,6 +386,7 @@ export class TerminalChat {
   /history [n]    显示最近 n 条对话历史 (默认 10)
   /agents, /team  显示 Agent Team 状态
   /analyze <任务> 分析任务复杂度
+  /project        显示项目结构理解
 
 直接输入消息与 AI 对话。
 复杂任务将自动组建 Agent Team 协作处理。
@@ -578,10 +583,77 @@ export class TerminalChat {
   }
 
   /**
+   * 显示项目理解信息
+   */
+  private async showProjectUnderstanding(): Promise<void> {
+    if (!this.core.projectUnderstanding) {
+      console.log('\n❌ 项目理解引擎未启用');
+      return;
+    }
+
+    const context = this.core.projectUnderstanding.getContext();
+    if (!context) {
+      console.log('\n⏳ 项目分析正在进行中，请稍后再试...');
+      return;
+    }
+
+    const m = context.metadata;
+    
+    console.log(`\n${chalk.bold('📊 项目深度理解')}`);
+    console.log(chalk.gray('─'.repeat(60)));
+    
+    // 基本信息
+    console.log(`${chalk.cyan('项目名称:')} ${context.name}`);
+    console.log(`${chalk.cyan('项目类型:')} ${context.type}`);
+    console.log(`${chalk.cyan('主要语言:')} ${context.language}`);
+    console.log(`${chalk.cyan('框架:')} ${context.framework || '未知'}`);
+    console.log(`${chalk.cyan('架构模式:')} ${context.architecture || '未知'}`);
+    
+    // 统计信息
+    console.log(`\n${chalk.bold('📈 统计信息')}`);
+    console.log(`  文件总数: ${m.totalFiles}`);
+    console.log(`  代码行数: ${m.totalLines.toLocaleString()}`);
+    console.log(`  模块数量: ${m.modules.length}`);
+    console.log(`  API 端点: ${m.apiEndpoints?.length || 0}`);
+    console.log(`  数据库实体: ${m.databaseEntities?.length || 0}`);
+    console.log(`  服务组件: ${m.services?.length || 0}`);
+    
+    // 模块分布
+    console.log(`\n${chalk.bold('📦 模块分布')}`);
+    const byType: Record<string, number> = {};
+    for (const mod of m.modules) {
+      byType[mod.type] = (byType[mod.type] || 0) + 1;
+    }
+    for (const [type, count] of Object.entries(byType).sort((a, b) => b[1] - a[1])) {
+      console.log(`  ${type}: ${count}`);
+    }
+    
+    // API 端点预览
+    if (m.apiEndpoints && m.apiEndpoints.length > 0) {
+      console.log(`\n${chalk.bold('🔌 API 端点 (前 10 个)')}`);
+      for (const api of m.apiEndpoints.slice(0, 10)) {
+        console.log(`  ${chalk.green(api.method)} ${api.path}`);
+      }
+    }
+    
+    // 数据库实体预览
+    if (m.databaseEntities && m.databaseEntities.length > 0) {
+      console.log(`\n${chalk.bold('🗄️ 数据库实体 (前 10 个)')}`);
+      for (const entity of m.databaseEntities.slice(0, 10)) {
+        console.log(`  ${entity.name} (表: ${entity.table})`);
+      }
+    }
+    
+    console.log(chalk.gray('─'.repeat(60)));
+    console.log(chalk.gray('提示: Agent 可以使用 project_understand 工具查询详情'));
+    console.log();
+  }
+
+  /**
    * 自动补全
    */
   private completer(line: string): [string[], string] {
-    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools', '/tasks', '/clear', '/history', '/agents', '/team', '/analyze'];
+    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools', '/tasks', '/clear', '/history', '/agents', '/team', '/analyze', '/project'];
     const hits = completions.filter((c) => c.startsWith(line));
     return [hits.length ? hits : completions, line];
   }

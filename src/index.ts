@@ -84,6 +84,7 @@ export class StarUpCore {
   scheduler: TaskScheduler;
   kairosEngine: KairosEngine;
   agentOrchestrator: DynamicAgentOrchestrator | null = null;
+  projectUnderstanding: import('./core/project/AdvancedProjectUnderstanding').AdvancedProjectUnderstanding | null = null;
   onScheduledTaskComplete?: (content: string) => void;
   private config: SystemConfig;
   private systemPrompt: string | null = null;
@@ -159,6 +160,24 @@ export class StarUpCore {
     // 加载 skills
     logger.info('StarUpCore', 'Loading skills...');
     await this.skillRegistry.initialize();
+    
+    // 初始化项目理解引擎
+    if (this.llmService) {
+      const { initProjectUnderstanding } = await import('./core/project/AdvancedProjectUnderstanding');
+      this.projectUnderstanding = initProjectUnderstanding(process.cwd(), this.llmService);
+      
+      // 执行项目理解分析（后台异步）
+      logger.info('StarUpCore', 'Analyzing project structure...');
+      this.projectUnderstanding.analyze().then(context => {
+        logger.info('StarUpCore', 
+          `Project analysis complete: ${context.metadata.modules.length} modules, ` +
+          `${context.metadata.apiEndpoints?.length || 0} APIs, ` +
+          `${context.metadata.databaseEntities?.length || 0} entities`
+        );
+      }).catch(err => {
+        logger.warn('StarUpCore', `Project analysis failed: ${err}`);
+      });
+    }
 
     // 设置定时任务执行器（后台静默执行，避免干扰 CLI spinner）
     this.scheduler.setExecutor({
