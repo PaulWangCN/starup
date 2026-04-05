@@ -14,6 +14,7 @@ export class TerminalChat {
   private renderer: Renderer;
   private rl: readline.Interface | null = null;
   private running: boolean = false;
+  private isProcessing: boolean = false;
   private mainSessionId: string | null = null;
   private promptAssembler: PromptAssembler;
   private notifications: string[] = [];
@@ -82,6 +83,11 @@ export class TerminalChat {
 
     // 处理输入
     this.rl.on('line', async (input) => {
+      // 如果正在处理中，忽略新输入并提示用户
+      if (this.isProcessing) {
+        this.renderer.system('AI 正在处理中，请稍候...');
+        return;
+      }
       try {
         await this.handleInput(input);
       } catch (error: any) {
@@ -299,9 +305,11 @@ export class TerminalChat {
       console.log();
     };
 
-    // 暂停 readline 以避免与流式输出冲突
+    // 标记正在处理中，防止并发输入
+    this.isProcessing = true;
+    // 先清除当前 readline 行并换行，避免流式输出与 readline 状态冲突
     if (this.rl) {
-      this.rl.pause();
+      process.stdout.write('\r' + ' '.repeat(80) + '\r\n');
     }
 
     // 启动加载动画
@@ -364,10 +372,8 @@ export class TerminalChat {
       this.renderer.error(`处理消息失败: ${error?.message || error}`);
       console.log();
     } finally {
-      // 恢复 readline
-      if (this.rl) {
-        this.rl.resume();
-      }
+      // 标记处理完成
+      this.isProcessing = false;
     }
   }
 
