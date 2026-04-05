@@ -14,6 +14,7 @@ import * as path from 'path';
 import { logger } from './utils/Logger';
 import { SessionManager, sessionManager } from './core/session/SessionManager';
 import { MemoryManager, memoryManager } from './core/memory/MemoryManager';
+import { AutoDream, autoDream, AutoDreamPersistence, ConversationObserver } from './core/memory';
 import { ToolRegistry, toolRegistry } from './core/tools/ToolRegistry';
 import { skillRegistry } from './core/skills/SkillRegistry';
 import { LLMService } from './core/llm/LLMService';
@@ -91,6 +92,7 @@ export class StarUpCore {
   kairosEngine: KairosEngine;
   agentOrchestrator: DynamicAgentOrchestrator | null = null;
   projectUnderstanding: import('./core/project/AdvancedProjectUnderstanding').AdvancedProjectUnderstanding | null = null;
+  conversationObservers: Map<string, ConversationObserver> = new Map(); // 每个会话一个观察器
   onScheduledTaskComplete?: (content: string) => void;
   private config: SystemConfig;
   private systemPrompt: string | null = null;
@@ -156,6 +158,15 @@ export class StarUpCore {
     
     // 确保配置文件存在
     await this.ensureConfigFiles();
+    
+    // 初始化 AutoDream 持久化层并启动
+    const autoDreamPersistence = new AutoDreamPersistence();
+    autoDream.setPersistence(autoDreamPersistence);
+    await autoDream.start();
+    logger.info('StarUpCore', `AutoDream started: ${autoDream.getStats().facts} facts loaded`);
+    
+    // 注入 AutoDream 到 MemoryManager
+    this.memoryManager.setAutoDream(autoDream);
     
     // 注入 LLM 服务到 MemoryManager（用于 AI 召回）
     if (this.llmService) {
@@ -394,6 +405,13 @@ export class StarUpCore {
       content: message,
       timestamp: Date.now(),
     });
+    
+    // 使用对话观察器记录用户输入
+    this.observeConversation(sessionId, {
+      role: 'user',
+      content: message,
+      timestamp: Date.now()
+    });
 
     if (!this.llmService) {
       return { thinking: [], finalReply: 'LLM service not configured' };
@@ -589,6 +607,14 @@ export class StarUpCore {
           content,
           timestamp: Date.now(),
         });
+        
+        // 记录 AI 回复到观察器
+        this.observeConversation(sessionId, {
+          role: 'assistant',
+          content,
+          timestamp: Date.now()
+        });
+        
         return { thinking, finalReply: content };
       }
 
@@ -610,6 +636,12 @@ export class StarUpCore {
         }
 
         const result = await this.toolRegistry.execute(toolName, toolArgs, session);
+        
+        // 记录工具调用结果到观察器（用于错误学习）
+        const observer = this.conversationObservers.get(sessionId);
+        if (observer) {
+          observer.onToolCall(toolName, toolArgs, result);
+        }
         
         if (callbacks?.onToolResult) {
           callbacks.onToolResult(toolName, result);
@@ -674,6 +706,13 @@ export class StarUpCore {
       await selfHealing.shutdown();
     }
     
+    // 停止 AutoDream
+    await autoDream.stop();
+    logger.info('StarUpCore', 'AutoDream stopped');
+    
+    // 清理对话观察器
+    this.conversationObservers.clear();
+    
     await this.scheduler.shutdown();
     this.skillRegistry.stopAutoScan();
     logger.info('StarUpCore', 'Shutdown complete');
@@ -693,6 +732,24 @@ export class StarUpCore {
   async stopKairosMode(): Promise<void> {
     await this.kairosEngine.stop();
     logger.info('StarUpCore', 'KAIROS mode stopped');
+  }
+
+  /**
+   * 观察对话并记录到 AutoDream
+   */
+  private observeConversation(
+    sessionId: string, 
+    message: { role: 'user' | 'assistant'; content: string; timestamp: number }
+  ): void {
+    // 获取或创建观察器
+    let observer = this.conversationObservers.get(sessionId);
+    if (!observer) {
+      observer = new ConversationObserver(autoDream, sessionId);
+      this.conversationObservers.set(sessionId, observer);
+    }
+    
+    // 记录消息
+    observer.onMessage(message);
   }
 
   /**
@@ -850,7 +907,13 @@ export {
 export { PermissionSystem, permissionSystem } from './core/security/PermissionSystem';
 
 // AutoDream记忆整合
-export { AutoDream, autoDream } from './core/memory/AutoDream';
+// AutoDream记忆系统
+export { 
+  AutoDream, 
+  autoDream,
+  AutoDreamPersistence,
+  ConversationObserver
+} from './core/memory';
 
 // 版本信息
 export const VERSION = '2.0.0';

@@ -3,21 +3,22 @@ import * as path from 'path';
 import { MemoryEntry, MemoryType, MemoryFrontmatter, ParsedMemory, RelevantMemory } from '../../types';
 import { LLMService } from '../llm/LLMService';
 import { logger } from '../../utils/Logger';
+import { AutoDream, Fact } from './AutoDream';
 
 /**
- * 记忆管理器 v3 - Claude Code 三层记忆架构实现
+ * 记忆管理器 v4 - 与 AutoDream 深度融合
  * 
  * 架构：
- * L1 Session Memory: .starup/session/memory.md - 10章节固定格式，服务于上下文压缩
+ * L1 Session Memory: .starup/session/memory.md - 10章节固定格式
  * L2 Persistent Memory: .starup/memory/{type}/*.md - 4种类型，AI召回
- * L3 Team Memory: .starup/memory/team/*.md - 团队协作（暂忽略）
+ * L3 AutoDream Facts: .starup/memory/autodream/memory.json - 自动整合的事实
  * 
  * 核心特性：
- * 1. AI 驱动的记忆召回（替代关键词匹配）
- * 2. 记忆新鲜度标注（防止过期幻觉）
+ * 1. AI 驱动的记忆召回（文件记忆 + AutoDream facts）
+ * 2. 记忆新鲜度标注
  * 3. YAML frontmatter 格式支持
- * 4. MEMORY.md 索引管理（200行/25KB限制）
- * 5. 两步保存流程（先写文件，再更新索引）
+ * 4. MEMORY.md 索引管理
+ * 5. AutoDream 事实自动导出到 Markdown
  */
 export class MemoryManager {
   private memoryDir: string;
@@ -25,6 +26,7 @@ export class MemoryManager {
   private logsDir: string;
   private longTermIndex: string = 'MEMORY.md';
   private llmService?: LLMService;
+  private autoDream?: AutoDream;
 
   // 索引限制
   private readonly MAX_ENTRYPOINT_LINES = 200;
@@ -32,6 +34,7 @@ export class MemoryManager {
   
   // 召回限制
   private readonly MAX_RELEVANT_MEMORIES = 5;
+  private readonly MAX_RELEVANT_FACTS = 3;
   private readonly MAX_SCAN_FILES = 200;
   private readonly FRESHNESS_WARNING_DAYS = 1;
   private readonly MAX_MEMORY_AGE_DAYS = 90;
@@ -40,20 +43,28 @@ export class MemoryManager {
   private readonly MAX_SECTION_LENGTH = 2000;
   private readonly MAX_TOTAL_SESSION_MEMORY_TOKENS = 12000;
 
-  constructor(llmService?: LLMService) {
+  constructor(llmService?: LLMService, autoDream?: AutoDream) {
     const baseDir = path.join(process.cwd(), '.starup');
     this.memoryDir = path.join(baseDir, 'memory');
     this.sessionDir = path.join(baseDir, 'session');
     this.logsDir = path.join(baseDir, 'logs');
     this.llmService = llmService;
+    this.autoDream = autoDream;
     this.ensureDirectories();
   }
 
   /**
-   * 设置 LLM 服务（用于 AI 召回）
+   * 设置 LLM 服务
    */
   setLLMService(service: LLMService): void {
     this.llmService = service;
+  }
+
+  /**
+   * 设置 AutoDream
+   */
+  setAutoDream(autoDream: AutoDream): void {
+    this.autoDream = autoDream;
   }
 
   /**
@@ -69,6 +80,7 @@ export class MemoryManager {
       path.join(this.memoryDir, 'project'),
       path.join(this.memoryDir, 'reference'),
       path.join(this.memoryDir, 'team'),
+      path.join(this.memoryDir, 'autodream'), // AutoDream 数据目录
     ];
 
     for (const dir of dirs) {
@@ -78,6 +90,157 @@ export class MemoryManager {
         logger.error('MemoryManager', `Failed to create directory ${dir}: ${error}`);
       }
     }
+  }
+
+  // ==================== AutoDream 集成 ====================
+
+  /**
+   * 查询 AutoDream Facts
+   */
+  queryAutoDreamFacts(query: string, limit: number = 3): Array<{content: string; confidence: number}> {
+    if (!this.autoDream) {
+      return [];
+    }
+    
+    const facts = this.autoDream.queryFacts(query, limit);
+    return facts.map(f => ({
+      content: f.content,
+      confidence: f.confidence
+    }));
+  }
+
+  /**
+   * 将高置信度 facts 导出到 Markdown 文件
+   * 供人工查看和其他工具使用
+   */
+  async exportFactsToMarkdown(minConfidence: number = 0.85): Promise<string | null> {
+    if (!this.autoDream) {
+      return null;
+    }
+    
+    const allFacts = this.autoDream.getFacts();
+    const highConfidenceFacts = allFacts.filter(f => f.confidence >= minConfidence);
+    
+    if (highConfidenceFacts.length === 0) {
+      return null;
+    }
+
+    const lines = [
+      '# AutoDream 高置信度事实',
+      '',
+      `生成时间: ${new Date().toISOString()}`,
+      `事实总数: ${allFacts.length}`,
+      `高置信度事实数 (≥${(minConfidence * 100).toFixed(0)}%): ${highConfidenceFacts.length}`,
+      '',
+      '> 本文件由 AutoDream 自动生成，包含系统自动整合的事实。\n> 这些事实基于多次观察，具有较高可信度。',
+      ''
+    ];
+
+    // 按主题分组
+    const byTopic = new Map<string, Fact[]>();
+    for (const fact of highConfidenceFacts) {
+      // 从内容中提取关键词作为主题
+      const topics = this.extractTopics(fact.content);
+      const mainTopic = topics[0] || 'general';
+      
+      if (!byTopic.has(mainTopic)) {
+        byTopic.set(mainTopic, []);
+      }
+      byTopic.get(mainTopic)!.push(fact);
+    }
+
+    // 输出分组
+    for (const [topic, facts] of byTopic) {
+      lines.push(`## ${topic}`);
+      lines.push('');
+      
+      for (const fact of facts.slice(0, 10)) { // 每主题最多10个
+        lines.push(`### ${fact.id}`);
+        lines.push(`- **置信度:** ${(fact.confidence * 100).toFixed(1)}%`);
+        lines.push(`- **首次发现:** ${new Date(fact.createdAt).toLocaleDateString()}`);
+        lines.push(`- **最后更新:** ${new Date(fact.updatedAt).toLocaleDateString()}`);
+        lines.push(`- **访问次数:** ${fact.accessCount}`);
+        lines.push('');
+        lines.push(fact.content);
+        lines.push('');
+      }
+    }
+
+    // 写入文件
+    const outputPath = path.join(this.memoryDir, 'autodream', 'facts_export.md');
+    await fs.writeFile(outputPath, lines.join('\n'), 'utf-8');
+    
+    logger.info('MemoryManager', `Exported ${highConfidenceFacts.length} facts to ${outputPath}`);
+    return outputPath;
+  }
+
+  /**
+   * 从观察自动创建记忆文件
+   * 当 AutoDream 整合出高置信度事实时，可自动写入记忆文件
+   */
+  async autoCreateMemoryFromFact(fact: Fact, type: MemoryType = 'project'): Promise<void> {
+    const filename = `autodream_${fact.id}.md`;
+    const name = fact.content.substring(0, 30) + (fact.content.length > 30 ? '...' : '');
+    
+    const frontmatter: MemoryFrontmatter = {
+      name,
+      description: `AutoDream 自动生成 (置信度: ${(fact.confidence * 100).toFixed(0)}%)`,
+      type,
+      tags: ['autodream', 'auto-generated']
+    };
+
+    const content = `
+${fact.content}
+
+---
+
+**来源**: AutoDream 记忆整合
+**置信度**: ${(fact.confidence * 100).toFixed(1)}%
+**观察来源**: ${fact.sources.join(', ')}
+**生成时间**: ${new Date(fact.createdAt).toISOString()}
+
+> 此记忆由系统自动生成，基于多次观察整合。
+> 如需修改，请直接编辑此文件。
+`;
+
+    await this.writeMemoryFile(filename, frontmatter, content, type);
+    logger.info('MemoryManager', `Auto-created memory file from fact: ${filename}`);
+  }
+
+  /**
+   * 定期维护：导出 facts、清理旧记忆
+   */
+  async performMaintenance(): Promise<{
+    factsExported: number;
+    oldMemoriesCleaned: number;
+  }> {
+    const result = {
+      factsExported: 0,
+      oldMemoriesCleaned: 0
+    };
+
+    // 1. 导出高置信度 facts
+    if (this.autoDream) {
+      const exportPath = await this.exportFactsToMarkdown();
+      if (exportPath) {
+        const facts = this.autoDream.getFacts().filter(f => f.confidence >= 0.85);
+        result.factsExported = facts.length;
+      }
+    }
+
+    // 2. 清理过旧的记忆文件（90天未修改）
+    const oldFiles = await this.findOldMemoryFiles(90);
+    for (const file of oldFiles) {
+      // 移动到归档目录，而不是删除
+      await this.archiveMemoryFile(file);
+      result.oldMemoriesCleaned++;
+    }
+
+    logger.info('MemoryManager', 
+      `Maintenance complete: ${result.factsExported} facts exported, ${result.oldMemoriesCleaned} files archived`
+    );
+    
+    return result;
   }
 
   // ==================== Session Memory (L1) ====================
@@ -146,7 +309,7 @@ _按时间顺序记录的操作_
 `;
   }
 
-  // ==================== 日志文件（KAIROS 模式） ====================
+  // ==================== 日志文件 ====================
 
   /**
    * 获取日志文件路径（按日期组织：logs/YYYY/MM/YYYY-MM-DD.md）
@@ -161,7 +324,7 @@ _按时间顺序记录的操作_
   }
 
   /**
-   * 追加日志条目（KAIROS 模式 - 只追加不编辑）
+   * 追加日志条目
    */
   async appendLog(entry: string, date?: Date): Promise<void> {
     const logPath = this.getLogPath(date);
@@ -179,15 +342,6 @@ _按时间顺序记录的操作_
 
   // ==================== Frontmatter 解析 ====================
 
-  /**
-   * 解析 frontmatter
-   * 支持 YAML 格式：
-   * ---
-   * name: xxx
-   * description: xxx
-   * type: user
-   * ---
-   */
   parseFrontmatter(content: string): { frontmatter: MemoryFrontmatter | null; body: string } {
     const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/;
     const match = content.match(frontmatterRegex);
@@ -199,7 +353,6 @@ _按时间顺序记录的操作_
     const frontmatterText = match[1];
     const body = match[2].trim();
 
-    // 简单 YAML 解析
     const frontmatter: Partial<MemoryFrontmatter> = {};
     const lines = frontmatterText.split('\n');
     
@@ -210,7 +363,6 @@ _按时间顺序记录的操作_
         const value = line.substring(colonIndex + 1).trim();
         
         if (key === 'tags') {
-          // 解析数组格式: [tag1, tag2] 或单行格式
           const cleanValue = value.replace(/^\[|\]$/g, '');
           frontmatter.tags = cleanValue.split(',').map(t => t.trim()).filter(t => t);
         } else {
@@ -219,7 +371,6 @@ _按时间顺序记录的操作_
       }
     }
 
-    // 验证必要字段
     if (!frontmatter.name || !frontmatter.description || !frontmatter.type) {
       return { frontmatter: null, body: content };
     }
@@ -230,9 +381,6 @@ _按时间顺序记录的操作_
     };
   }
 
-  /**
-   * 生成 frontmatter
-   */
   generateFrontmatter(frontmatter: MemoryFrontmatter): string {
     const lines = ['---'];
     lines.push(`name: ${frontmatter.name}`);
@@ -253,16 +401,12 @@ _按时间顺序记录的操作_
 
   // ==================== 持久记忆读写（L2） ====================
 
-  /**
-   * 读取记忆文件（带 frontmatter 解析）
-   */
   async readMemoryFile(filePath: string): Promise<ParsedMemory | null> {
     try {
       const content = await fs.readFile(filePath, 'utf-8');
       const stats = await fs.stat(filePath);
       const { frontmatter, body } = this.parseFrontmatter(content);
 
-      // 如果没有 frontmatter，尝试兼容旧格式
       if (!frontmatter) {
         const filename = path.basename(filePath, '.md');
         const firstLine = content.split('\n')[0]?.replace(/^#\s*/, '') || filename;
@@ -290,13 +434,6 @@ _按时间顺序记录的操作_
     }
   }
 
-  /**
-   * 写入记忆文件（带 frontmatter）
-   * 
-   * 两步保存流程：
-   * 1. 写入记忆文件
-   * 2. 更新 MEMORY.md 索引
-   */
   async writeMemoryFile(
     filename: string,
     frontmatter: MemoryFrontmatter,
@@ -310,14 +447,9 @@ _按时间顺序记录的操作_
     const fullContent = this.generateFrontmatter(frontmatter) + content;
     
     await fs.writeFile(filePath, fullContent, 'utf-8');
-    
-    // 更新索引
     await this.updateMemoryIndex(frontmatter, filename, type);
   }
 
-  /**
-   * 删除记忆文件
-   */
   async deleteMemoryFile(filename: string, type?: MemoryType): Promise<void> {
     const dir = type ? path.join(this.memoryDir, type) : this.memoryDir;
     const filePath = path.join(dir, filename);
@@ -330,24 +462,12 @@ _按时间顺序记录的操作_
     }
   }
 
-  // ==================== MEMORY.md 索引管理 ====================
+  // ==================== 索引管理 ====================
 
-  /**
-   * 获取索引文件路径
-   */
   getIndexPath(): string {
     return path.join(this.memoryDir, this.longTermIndex);
   }
 
-  /**
-   * 更新 MEMORY.md 索引
-   * 
-   * 格式：- [记忆名称](path/to/file.md) — 简短描述（约150字符以内）
-   * 限制：
-   * - 最大 200 行（MAX_ENTRYPOINT_LINES）
-   * - 最大 25,000 字节（MAX_ENTRYPOINT_BYTES）
-   * - 超出时在末尾追加截断警告
-   */
   private async updateMemoryIndex(
     frontmatter: MemoryFrontmatter,
     filename: string,
@@ -359,18 +479,15 @@ _按时间顺序记录的操作_
     try {
       indexContent = await fs.readFile(indexPath, 'utf-8');
     } catch {
-      // 文件不存在，创建新索引
       indexContent = '# 记忆索引\n\n本文件索引所有持久化记忆。\n';
       for (const t of ['user', 'feedback', 'project', 'reference']) {
         indexContent += `\n## ${t}\n`;
       }
     }
 
-    // 构建相对路径
     const relativePath = type ? `${type}/${filename}` : filename;
     const entryPattern = new RegExp(`- \\[[^\\]]+\\]\\(${relativePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)`);
     
-    // 截断描述到约150字符
     const truncatedDesc = frontmatter.description.length > 150 
       ? frontmatter.description.substring(0, 147) + '...'
       : frontmatter.description;
@@ -378,7 +495,6 @@ _按时间顺序记录的操作_
     const newEntry = `- [${frontmatter.name}](${relativePath}) — ${truncatedDesc}`;
 
     if (entryPattern.test(indexContent)) {
-      // 更新现有条目
       const lines = indexContent.split('\n');
       const newLines = lines.map(line => {
         if (entryPattern.test(line)) {
@@ -388,7 +504,6 @@ _按时间顺序记录的操作_
       });
       indexContent = newLines.join('\n');
     } else {
-      // 在对应类型章节下添加新条目
       const typeSection = type || 'reference';
       const sectionPattern = new RegExp(`(## ${typeSection}\\n)`);
       
@@ -399,15 +514,10 @@ _按时间顺序记录的操作_
       }
     }
 
-    // 应用索引限制
     indexContent = this.enforceIndexLimits(indexContent);
-
     await fs.writeFile(indexPath, indexContent, 'utf-8');
   }
 
-  /**
-   * 从索引中移除条目
-   */
   private async removeFromIndex(filename: string, type?: MemoryType): Promise<void> {
     const indexPath = this.getIndexPath();
     
@@ -423,13 +533,9 @@ _按时间顺序记录的操作_
     }
   }
 
-  /**
-   * 强制执行索引限制
-   */
   private enforceIndexLimits(content: string): string {
     const buffer = Buffer.from(content, 'utf-8');
     
-    // 检查字节限制
     if (buffer.length > this.MAX_ENTRYPOINT_BYTES) {
       const lines = content.split('\n');
       let currentBytes = 0;
@@ -448,7 +554,6 @@ _按时间顺序记录的操作_
       content += '\n\n> ⚠️ **索引已截断**：已达最大大小限制，部分旧条目未显示。\n';
     }
     
-    // 检查行数限制
     const lines = content.split('\n');
     if (lines.length > this.MAX_ENTRYPOINT_LINES) {
       const truncated = lines.slice(0, this.MAX_ENTRYPOINT_LINES - 3);
@@ -459,9 +564,6 @@ _按时间顺序记录的操作_
     return content;
   }
 
-  /**
-   * 读取索引
-   */
   async readIndex(): Promise<string> {
     try {
       return await fs.readFile(this.getIndexPath(), 'utf-8');
@@ -470,15 +572,11 @@ _按时间顺序记录的操作_
     }
   }
 
-  // ==================== 扫描与召回 ====================
+  // ==================== 扫描与召回（增强版） ====================
 
-  /**
-   * 扫描所有记忆文件
-   */
   async scanMemoryFiles(): Promise<ParsedMemory[]> {
     const memories: ParsedMemory[] = [];
 
-    // 递归扫描目录
     const scanDir = async (dir: string) => {
       try {
         const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -488,7 +586,8 @@ _按时间顺序记录的操作_
           
           const fullPath = path.join(dir, entry.name);
           
-          if (entry.isDirectory() && entry.name !== 'team') {
+          // 跳过 autodream 目录（那是 AutoDream 自己的数据）
+          if (entry.isDirectory() && entry.name !== 'team' && entry.name !== 'autodream') {
             await scanDir(fullPath);
           } else if (entry.name.endsWith('.md') && entry.name !== this.longTermIndex) {
             const memory = await this.readMemoryFile(fullPath);
@@ -503,43 +602,68 @@ _按时间顺序记录的操作_
     };
 
     await scanDir(this.memoryDir);
-
-    // 按修改时间降序排序
     memories.sort((a, b) => b.mtime - a.mtime);
     
     return memories.slice(0, this.MAX_SCAN_FILES);
   }
 
   /**
-   * AI 驱动的记忆召回
-   * 
-   * 使用 LLM 选择最相关的记忆，替代简单的关键词匹配
+   * 增强的记忆召回：文件记忆 + AutoDream Facts
    */
   async findRelevantMemories(query: string, recentTools?: string[]): Promise<RelevantMemory[]> {
-    // 1. 扫描所有记忆
+    // 1. 召回文件记忆
+    const fileMemories = await this.findRelevantFileMemories(query, recentTools);
+    
+    // 2. 召回 AutoDream Facts
+    const facts = this.autoDream ? this.autoDream.queryFacts(query, this.MAX_RELEVANT_FACTS) : [];
+    
+    // 3. 合并结果（Facts 转换为 RelevantMemory 格式）
+    const factMemories: RelevantMemory[] = facts.map(f => ({
+      memory: {
+        path: `autodream://${f.id}`,
+        frontmatter: {
+          name: f.content.substring(0, 50),
+          description: `AutoDream Fact (置信度: ${(f.confidence * 100).toFixed(0)}%)`,
+          type: 'autodream',
+        },
+        content: f.content,
+        mtime: f.updatedAt,
+      },
+      reason: 'AutoDream 事实',
+      freshness: `${this.memoryAgeDays(f.updatedAt)} 天前`,
+    }));
+    
+    // 4. 合并并去重
+    const combined = [...fileMemories, ...factMemories];
+    
+    // 按相关性和新鲜度排序
+    // 这里简化处理：文件记忆优先，然后是 facts
+    return combined.slice(0, this.MAX_RELEVANT_MEMORIES + this.MAX_RELEVANT_FACTS);
+  }
+
+  /**
+   * 召回文件记忆（原来的 findRelevantMemories 逻辑）
+   */
+  private async findRelevantFileMemories(query: string, recentTools?: string[]): Promise<RelevantMemory[]> {
     const allMemories = await this.scanMemoryFiles();
     
     if (allMemories.length === 0) {
       return [];
     }
 
-    // 过滤掉过旧的记忆（90天）
     const now = Date.now();
     const validMemories = allMemories.filter(m => {
       const age = (now - m.mtime) / (1000 * 60 * 60 * 24);
       return age <= this.MAX_MEMORY_AGE_DAYS;
     });
 
-    // 如果没有 LLM 服务，回退到简单匹配
     if (!this.llmService) {
       return this.fallbackKeywordSearch(query, validMemories);
     }
 
     try {
-      // 2. 构建选择提示
       const selectionPrompt = this.buildMemorySelectionPrompt(query, validMemories, recentTools);
       
-      // 3. 调用 LLM 选择
       const response = await this.llmService.chat(
         [
           { role: 'system', content: selectionPrompt.system, timestamp: Date.now() },
@@ -549,10 +673,8 @@ _按时间顺序记录的操作_
         { maxTokens: 512 }
       );
 
-      // 4. 解析选择结果
       const selectedPaths = this.parseSelectionResponse(response.content);
       
-      // 5. 构建结果
       const results: RelevantMemory[] = [];
       for (const { path: memoryPath, reason } of selectedPaths) {
         const memory = validMemories.find(m => 
@@ -577,9 +699,6 @@ _按时间顺序记录的操作_
     }
   }
 
-  /**
-   * 构建记忆选择提示词
-   */
   private buildMemorySelectionPrompt(
     query: string,
     memories: ParsedMemory[],
@@ -602,7 +721,6 @@ selected_files:
 如果没有相关的：
 selected_files: none`;
 
-    // 构建记忆列表
     const memoryList = memories.map(m => {
       const relativePath = path.relative(this.memoryDir, m.path);
       const age = this.memoryAgeDays(m.mtime);
@@ -619,13 +737,9 @@ selected_files: none`;
     return { system, user: userParts.join('\n') };
   }
 
-  /**
-   * 解析选择响应
-   */
   private parseSelectionResponse(content: string): Array<{ path: string; reason: string }> {
     const results: Array<{ path: string; reason: string }> = [];
     
-    // 查找 selected_files: 部分
     const match = content.match(/selected_files:\s*\n?([\s\S]*?)(?:\n\n|$)/i);
     if (!match) return results;
 
@@ -648,9 +762,6 @@ selected_files: none`;
     return results;
   }
 
-  /**
-   * 回退：关键词搜索（无 LLM 时使用）
-   */
   private fallbackKeywordSearch(query: string, memories: ParsedMemory[]): RelevantMemory[] {
     const keywords = this.extractKeywords(query);
     const scored: Array<{ memory: ParsedMemory; score: number }> = [];
@@ -663,9 +774,8 @@ selected_files: none`;
         if (text.includes(keyword)) score += 1;
       }
 
-      // 时间衰减：越新的记忆分数越高
       const age = this.memoryAgeDays(memory.mtime);
-      score *= Math.max(0.3, 1 - age / 30);  // 30 天后降至 30%
+      score *= Math.max(0.3, 1 - age / 30);
 
       if (score > 0) {
         scored.push({ memory, score });
@@ -683,20 +793,12 @@ selected_files: none`;
 
   // ==================== 新鲜度管理 ====================
 
-  /**
-   * 计算记忆年龄（天数）
-   */
   memoryAgeDays(mtimeMs: number): number {
     const now = Date.now();
     const diff = now - mtimeMs;
     return Math.floor(diff / (1000 * 60 * 60 * 24));
   }
 
-  /**
-   * 获取新鲜度文本
-   * 
-   * 使用相对时间（X 天前）比 ISO 时间戳更能触发模型的过期推理
-   */
   getFreshnessText(mtimeMs: number): string {
     const days = this.memoryAgeDays(mtimeMs);
     
@@ -705,37 +807,88 @@ selected_files: none`;
     return `${days} 天前`;
   }
 
-  /**
-   * 获取新鲜度警告
-   * 
-   * 超过 1 天的记忆会附加警告，防止模型将过期记忆当作事实
-   */
   getFreshnessWarning(mtimeMs: number): string {
     const days = this.memoryAgeDays(mtimeMs);
     
     if (days <= this.FRESHNESS_WARNING_DAYS) {
-      return '';  // 新鲜记忆不加警告
+      return '';
     }
 
-    return `\n\n⚠️ **记忆新鲜度警告**\n此记忆来自 ${days} 天前。\n记忆是 point-in-time 观察，非实时状态——关于代码行为或文件行号的声明可能已过时。断言为事实前请先与当前代码核对。`;
+    return `
+
+⚠️ **记忆新鲜度警告**
+此记忆来自 ${days} 天前。
+记忆是 point-in-time 观察，非实时状态——关于代码行为或文件行号的声明可能已过时。断言为事实前请先与当前代码核对。`;
   }
 
-  /**
-   * 格式化记忆内容（带新鲜度标注）
-   */
   formatMemoryContent(memory: ParsedMemory): string {
     const freshness = this.getFreshnessWarning(memory.mtime);
-    return `## ${memory.frontmatter.name}\n**类型：**${memory.frontmatter.type} | **更新于：**${this.getFreshnessText(memory.mtime)}\n\n${memory.content}${freshness}`;
+    return `## ${memory.frontmatter.name}
+**类型：**${memory.frontmatter.type} | **更新于：**${this.getFreshnessText(memory.mtime)}
+
+${memory.content}${freshness}`;
   }
 
-  // ==================== 记忆注入 ====================
-
-  /**
-   * 获取相关记忆并注入上下文
-   */
   async injectRelevantMemories(context: string, _session?: any): Promise<string[]> {
     const relevant = await this.findRelevantMemories(context);
     return relevant.map(r => this.formatMemoryContent(r.memory));
+  }
+
+  // ==================== 维护功能 ====================
+
+  /**
+   * 查找旧记忆文件
+   */
+  private async findOldMemoryFiles(maxAgeDays: number): Promise<string[]> {
+    const oldFiles: string[] = [];
+    const cutoff = Date.now() - (maxAgeDays * 24 * 60 * 60 * 1000);
+
+    const scanDir = async (dir: string) => {
+      try {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          
+          if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'autodream') {
+            await scanDir(fullPath);
+          } else if (entry.name.endsWith('.md')) {
+            const stats = await fs.stat(fullPath);
+            if (stats.mtimeMs < cutoff) {
+              oldFiles.push(fullPath);
+            }
+          }
+        }
+      } catch (error) {
+        // 忽略错误
+      }
+    };
+
+    await scanDir(this.memoryDir);
+    return oldFiles;
+  }
+
+  /**
+   * 归档记忆文件
+   */
+  private async archiveMemoryFile(filePath: string): Promise<void> {
+    const archiveDir = path.join(this.memoryDir, 'archive');
+    await fs.mkdir(archiveDir, { recursive: true });
+    
+    const fileName = path.basename(filePath);
+    const archivePath = path.join(archiveDir, `${Date.now()}_${fileName}`);
+    
+    try {
+      await fs.rename(filePath, archivePath);
+      // 从索引中移除
+      const relativePath = path.relative(this.memoryDir, filePath);
+      const parts = relativePath.split(path.sep);
+      if (parts.length === 2) {
+        await this.removeFromIndex(parts[1], parts[0] as MemoryType);
+      }
+    } catch (error) {
+      logger.warn('MemoryManager', `Failed to archive ${filePath}: ${error}`);
+    }
   }
 
   // ==================== 私有方法 ====================
@@ -748,6 +901,11 @@ selected_files: none`;
       .filter(w => w.length > 2);
     
     return [...new Set(words)].slice(0, 10);
+  }
+
+  private extractTopics(content: string): string[] {
+    const keywords = this.extractKeywords(content);
+    return keywords.slice(0, 3);
   }
 }
 

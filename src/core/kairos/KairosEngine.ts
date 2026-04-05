@@ -16,6 +16,7 @@ import { starupDB } from '../persistence/Database';
 import { sessionPersistence } from '../persistence/SessionPersistence';
 import { selfHealing } from '../resilience/SelfHealing';
 import { logger } from '../../utils/Logger';
+import { autoDream, AutoDream } from '../memory/AutoDream';
 
 export interface KairosConfig {
   tickInterval: number;      // tick 间隔（毫秒），默认 5 分钟
@@ -415,6 +416,8 @@ export class KairosEngine {
 
   /**
    * 运行 autoDream（记忆整合）
+   * 
+   * 调用真正的 AutoDream 进行记忆整合
    */
   async runAutoDream(): Promise<void> {
     const startTime = Date.now();
@@ -422,31 +425,27 @@ export class KairosEngine {
     starupDB.logKairos('info', 'autodream', 'Starting memory consolidation');
 
     try {
-      // 1. 扫描记忆文件
-      const memoryDir = path.join(process.cwd(), '.starup', 'memory');
-      const memories = await this.scanMemories(memoryDir);
+      // 使用真正的 AutoDream 进行整合
+      const beforeStats = autoDream.getStats();
+      await autoDream.forceConsolidate();
+      const afterStats = autoDream.getStats();
 
-      // 2. 识别相似记忆
-      const duplicates = this.findDuplicateMemories(memories);
-
-      // 3. 合并相似记忆
-      for (const group of duplicates) {
-        await this.mergeMemories(group);
+      // 触发 MemoryManager 维护（导出高置信度 facts）
+      if (this.core) {
+        await this.core.memoryManager.performMaintenance();
       }
-
-      // 4. 清理过期记忆
-      await this.cleanupOldMemories(memories);
 
       const duration = Date.now() - startTime;
       
       this.currentTick?.actions.push({
         type: 'memory_consolidation',
-        description: `Consolidated ${duplicates.length} groups of memories`,
+        description: `Consolidated: ${afterStats.insights - beforeStats.insights} new insights, ${afterStats.facts - beforeStats.facts} new facts`,
         duration,
       });
 
       starupDB.logKairos('info', 'autodream', `Memory consolidation completed in ${duration}ms`, {
-        duplicatesFound: duplicates.length,
+        before: beforeStats,
+        after: afterStats,
       });
 
     } catch (error) {

@@ -46,11 +46,12 @@ __pycache__/
 tmp/
 temp/
 
-# Session snapshots
+# Session snapshots & runtime data
 .starup/snapshots/
 .starup/*.db
 .starup/*.db-shm
 .starup/*.db-wal
+.starup/memory/autodream/
 
 # Skills index (auto-generated)
 .starup/skills_index.md

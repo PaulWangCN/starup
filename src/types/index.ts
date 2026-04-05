@@ -100,7 +100,7 @@ export interface SessionMemory {
  * - project: 项目进展、目标、事件（偏向团队）
  * - reference: 外部系统指针（通常团队）
  */
-export type MemoryType = 'user' | 'feedback' | 'project' | 'reference';
+export type MemoryType = 'user' | 'feedback' | 'project' | 'reference' | 'autodream';
 
 /**
  * 记忆文件 frontmatter 结构
@@ -108,7 +108,7 @@ export type MemoryType = 'user' | 'feedback' | 'project' | 'reference';
 export interface MemoryFrontmatter {
   name: string;
   description: string;
-  type: MemoryType;
+  type: MemoryType | 'autodream';
   created?: string;            // ISO 日期
   updated?: string;            // ISO 日期
   tags?: string[];
