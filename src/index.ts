@@ -56,7 +56,7 @@ export * from './core/prompt';
 export * from './core/intent';
 export { StarUpDatabase, SessionRecord, SessionSnapshot as DBSessionSnapshot, PendingTask, SystemState, starupDB } from './core/persistence/Database';
 export { SessionPersistence, PersistedSession, sessionPersistence } from './core/persistence/SessionPersistence';
-export * from './core/resilience/SelfHealing';
+export { SelfHealingSystem, selfHealing } from './core/resilience/SelfHealing';
 export * from './core/kairos/KairosEngine';
 export * from './core/orchestration/AgentTeam';
 export * from './core/lsp/LSPClient';
@@ -802,3 +802,49 @@ export class StarUpCore {
 }
 
 export default StarUpCore;
+
+// ==================== v2.0 增强功能导出 ====================
+
+// 并行工具系统
+export { 
+  ParallelToolExecutor,
+  ToolExecutionGraph 
+} from './core/tools/ParallelToolExecutor';
+
+// Subagent编排系统
+export { 
+  SubagentOrchestrator,
+  type Subagent,
+  type SubagentConfig,
+  type SubagentRole,
+  type Task,
+  type TaskResult,
+  type CoordinationMission 
+} from './core/agentic/SubagentOrchestrator';
+
+// LSP集成
+export { 
+  LanguageServerManager,
+  type LSPClient,
+  type Position,
+  type Range,
+  type Location,
+  type DocumentSymbol,
+  type SymbolInformation,
+  type Diagnostic,
+  type CompletionItem,
+  type Hover,
+  SymbolKind,
+  CompletionItemKind,
+  DiagnosticSeverity
+} from './core/lsp/LanguageServerManager';
+
+// 权限系统
+export { PermissionSystem, permissionSystem } from './core/security/PermissionSystem';
+
+// AutoDream记忆整合
+export { AutoDream, autoDream } from './core/memory/AutoDream';
+
+// 版本信息
+export const VERSION = '2.0.0';
+export const CODENAME = 'Nightingale';

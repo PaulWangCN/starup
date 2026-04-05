@@ -87,8 +87,7 @@ export class StarUpDatabase {
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         context TEXT NOT NULL DEFAULT '{}',
-        metadata TEXT NOT NULL DEFAULT '{}',
-        FOREIGN KEY (parent_id) REFERENCES sessions(id) ON DELETE CASCADE
+        metadata TEXT NOT NULL DEFAULT '{}'
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
       CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_id);
@@ -103,8 +102,7 @@ export class StarUpDatabase {
         messages TEXT NOT NULL,
         summary TEXT,
         token_count INTEGER NOT NULL DEFAULT 0,
-        checksum TEXT NOT NULL,
-        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        checksum TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_snapshots_session ON session_snapshots(session_id);
       CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON session_snapshots(timestamp);
@@ -120,8 +118,7 @@ export class StarUpDatabase {
         status TEXT NOT NULL DEFAULT 'pending',
         retry_count INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        updated_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_tasks_session ON pending_tasks(session_id);
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON pending_tasks(status);
@@ -163,15 +160,24 @@ export class StarUpDatabase {
 
     const stmt = this.db.prepare(`
       INSERT INTO sessions (id, type, status, parent_id, created_at, updated_at, context, metadata)
-      VALUES (@id, @type, @status, @parentId, @createdAt, @updatedAt, @context, @metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
-        status = @status,
-        updated_at = @updatedAt,
-        context = @context,
-        metadata = @metadata
+        status = excluded.status,
+        updated_at = excluded.updated_at,
+        context = excluded.context,
+        metadata = excluded.metadata
     `);
 
-    stmt.run(session);
+    stmt.run(
+      session.id,
+      session.type,
+      session.status,
+      session.parentId || null,
+      session.createdAt,
+      session.updatedAt,
+      session.context,
+      session.metadata
+    );
   }
 
   /**
@@ -220,10 +226,18 @@ export class StarUpDatabase {
 
     const stmt = this.db.prepare(`
       INSERT INTO session_snapshots (id, session_id, timestamp, messages, summary, token_count, checksum)
-      VALUES (@id, @sessionId, @timestamp, @messages, @summary, @tokenCount, @checksum)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(snapshot);
+    stmt.run(
+      snapshot.id,
+      snapshot.sessionId,
+      snapshot.timestamp,
+      snapshot.messages,
+      snapshot.summary || null,
+      snapshot.tokenCount,
+      snapshot.checksum
+    );
 
     // 只保留最近 10 个快照
     this.cleanupOldSnapshots(snapshot.sessionId, 10);

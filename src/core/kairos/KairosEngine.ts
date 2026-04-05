@@ -386,6 +386,7 @@ export class KairosEngine {
         });
       }
     }, this.config.tickInterval);
+    (this.tickTimer as any).unref();
   }
 
   /**
@@ -401,6 +402,7 @@ export class KairosEngine {
         });
       }
     }, this.config.autoDreamInterval);
+    (this.autoDreamTimer as any).unref();
   }
 
   /**

@@ -165,6 +165,7 @@ export class SelfHealingSystem {
     this.healthCheckTimer = setInterval(() => {
       this.performHealthCheck();
     }, this.HEALTH_CHECK_INTERVAL);
+    (this.healthCheckTimer as any).unref();
 
     logger.debug('SelfHealing', 'Health monitoring started');
   }

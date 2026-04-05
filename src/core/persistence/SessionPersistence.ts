@@ -240,6 +240,7 @@ export class SessionPersistence {
         this.createSnapshot(session);
       }
     }, this.SAVE_INTERVAL);
+    (this.autoSaveInterval as any).unref();
 
     logger.debug('SessionPersistence', `Auto-save started (${this.SAVE_INTERVAL}ms interval)`);
   }
@@ -284,10 +285,18 @@ export class SessionPersistence {
     activeSessions: number;
     pendingTasks: number;
   } {
-    return {
-      activeSessions: this.activeSessions.size,
-      pendingTasks: starupDB.getPendingTasks().length,
-    };
+    try {
+      return {
+        activeSessions: this.activeSessions.size,
+        pendingTasks: starupDB.getPendingTasks().length,
+      };
+    } catch {
+      // 数据库未初始化时返回默认值
+      return {
+        activeSessions: this.activeSessions.size,
+        pendingTasks: 0,
+      };
+    }
   }
 }
 

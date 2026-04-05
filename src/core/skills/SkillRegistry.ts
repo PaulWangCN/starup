@@ -321,6 +321,7 @@ export class SkillRegistry {
     this.scanInterval = setInterval(() => {
       this.rescan().catch((err) => logger.error('SkillRegistry', `Auto scan failed: ${err}`));
     }, 4 * 60 * 60 * 1000);
+    (this.scanInterval as any).unref();
   }
 
   /**

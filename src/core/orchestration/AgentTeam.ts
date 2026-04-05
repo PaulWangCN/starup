@@ -564,6 +564,7 @@ export class AgentTeam extends EventEmitter {
         }
       }
     }, this.HEARTBEAT_INTERVAL);
+    (this.heartbeatTimer as any).unref();
   }
 
   /**

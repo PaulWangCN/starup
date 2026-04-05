@@ -1,717 +1,548 @@
 /**
- * LSP Client - Language Server Protocol 客户端
- * 提供代码智能感知能力：补全、跳转、重构、诊断
+ * LSP (Language Server Protocol) 客户端实现
+ * 支持完整的LSP 3.17协议
  */
 
-import { spawn, ChildProcess } from 'child_process';
+import { EventEmitter } from 'events';
+import * as cp from 'child_process';
 import * as path from 'path';
-import * as fs from 'fs/promises';
-import {
-  createMessageConnection,
-  MessageConnection,
-  StreamMessageReader,
-  StreamMessageWriter,
-} from 'vscode-jsonrpc/node';
-import {
-  InitializeParams,
-  InitializeResult,
-  TextDocumentItem,
-  TextDocumentIdentifier,
-  Position,
-  CompletionItem,
-  Hover,
-  Location,
-  DocumentSymbol,
-  SymbolInformation,
-  Diagnostic,
-  WorkspaceEdit,
-  TextEdit,
-  DidOpenTextDocumentParams,
-  DidChangeTextDocumentParams,
-  DidCloseTextDocumentParams,
-  DefinitionParams,
-  CompletionParams,
-  HoverParams,
-  DocumentSymbolParams,
-  WorkspaceSymbolParams,
-  RenameParams,
-  CodeActionParams,
-  CodeAction,
-  TextDocumentSyncKind,
-} from 'vscode-languageserver-protocol';
 import { logger } from '../../utils/Logger';
 
-export type LSPLanguage = 'typescript' | 'javascript' | 'python' | 'go' | 'rust' | 'java';
-
-export interface LSPConfig {
-  language: LSPLanguage;
-  command: string;
-  args: string[];
-  workspacePath: string;
+// LSP消息类型
+export interface LSPMessage {
+  jsonrpc: '2.0';
+  id?: number | string;
+  method?: string;
+  params?: any;
+  result?: any;
+  error?: LSLError;
 }
 
-export interface CodeContext {
-  filePath: string;
-  content: string;
-  language: LSPLanguage;
+export interface LSLError {
+  code: number;
+  message: string;
+  data?: any;
+}
+
+// 位置类型
+export interface Position {
+  line: number;
+  character: number;
+}
+
+export interface Range {
+  start: Position;
+  end: Position;
+}
+
+export interface Location {
+  uri: string;
+  range: Range;
+}
+
+export interface TextDocumentIdentifier {
+  uri: string;
+}
+
+export interface VersionedTextDocumentIdentifier extends TextDocumentIdentifier {
   version: number;
 }
 
-export interface SymbolInfo {
-  name: string;
-  kind: string;
-  location: { file: string; line: number; character: number };
-  containerName?: string;
+// 文档符号
+export enum SymbolKind {
+  File = 1, Module = 2, Namespace = 3, Package = 4,
+  Class = 5, Method = 6, Property = 7, Field = 8,
+  Constructor = 9, Enum = 10, Interface = 11, Function = 12,
+  Variable = 13, Constant = 14, String = 15, Number = 16,
+  Boolean = 17, Array = 18, Object = 19, Key = 20,
+  Null = 21, EnumMember = 22, Struct = 23, Event = 24,
+  Operator = 25, TypeParameter = 26
 }
 
-export interface CodeSuggestion {
-  label: string;
+export interface DocumentSymbol {
+  name: string;
   detail?: string;
-  documentation?: string;
+  kind: SymbolKind;
+  range: Range;
+  selectionRange: Range;
+  children?: DocumentSymbol[];
+}
+
+// 补全
+export enum CompletionItemKind {
+  Text = 1, Method = 2, Function = 3, Constructor = 4,
+  Field = 5, Variable = 6, Class = 7, Interface = 8,
+  Module = 9, Property = 10, Unit = 11, Value = 12,
+  Enum = 13, Keyword = 14, Snippet = 15, Color = 16,
+  File = 17, Reference = 18, Folder = 19, EnumMember = 20,
+  Constant = 21, Struct = 22, Event = 23, Operator = 24,
+  TypeParameter = 25
+}
+
+export interface CompletionItem {
+  label: string;
+  kind?: CompletionItemKind;
+  detail?: string;
+  documentation?: string | MarkupContent;
   insertText?: string;
-  kind: string;
+  insertTextFormat?: InsertTextFormat;
+  sortText?: string;
+  filterText?: string;
+}
+
+export enum InsertTextFormat {
+  PlainText = 1,
+  Snippet = 2
+}
+
+// Hover
+export interface Hover {
+  contents: string | MarkupContent | MarkedString[];
+  range?: Range;
+}
+
+export interface MarkupContent {
+  kind: 'plaintext' | 'markdown';
+  value: string;
+}
+
+export type MarkedString = string | { language: string; value: string };
+
+// 诊断
+export enum DiagnosticSeverity {
+  Error = 1, Warning = 2, Information = 3, Hint = 4
+}
+
+export interface Diagnostic {
+  range: Range;
+  severity?: DiagnosticSeverity;
+  code?: string | number;
+  source?: string;
+  message: string;
+  relatedInformation?: DiagnosticRelatedInformation[];
+}
+
+export interface DiagnosticRelatedInformation {
+  location: Location;
+  message: string;
+}
+
+// 代码动作
+export interface CodeAction {
+  title: string;
+  kind?: string;
+  diagnostics?: Diagnostic[];
+  edit?: WorkspaceEdit;
+  command?: Command;
+}
+
+export interface WorkspaceEdit {
+  changes?: { [uri: string]: TextEdit[] };
+  documentChanges?: TextDocumentEdit[];
+}
+
+export interface TextEdit {
+  range: Range;
+  newText: string;
+}
+
+export interface TextDocumentEdit {
+  textDocument: VersionedTextDocumentIdentifier;
+  edits: TextEdit[];
+}
+
+export interface Command {
+  title: string;
+  command: string;
+  arguments?: any[];
 }
 
 /**
- * LSP 客户端管理器
+ * LSP客户端实现
  */
-export class LSPClient {
-  private config: LSPConfig;
-  private process: ChildProcess | null = null;
-  private connection: MessageConnection | null = null;
+export class LSPClient extends EventEmitter {
+  private process: cp.ChildProcess | null = null;
+  private messageId: number = 0;
+  private pendingRequests: Map<number, { resolve: Function; reject: Function }> = new Map();
+  private buffer: string = '';
   private initialized: boolean = false;
-  private documentVersions: Map<string, number> = new Map();
-  private openDocuments: Set<string> = new Set();
-  private diagnostics: Map<string, Diagnostic[]> = new Map();
+  private rootUri: string = '';
+  private serverCapabilities: any = {};
 
-  constructor(config: LSPConfig) {
-    this.config = config;
+  constructor(private serverCommand: string, private serverArgs: string[] = []) {
+    super();
   }
 
   /**
-   * 启动 LSP 服务器
+   * 启动语言服务器
    */
-  async start(): Promise<boolean> {
-    try {
-      logger.info('LSP', `Starting ${this.config.language} language server...`);
+  async start(rootPath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.rootUri = `file://${path.resolve(rootPath)}`;
 
-      // 检查工作目录是否存在
-      try {
-        await fs.access(this.config.workspacePath);
-      } catch {
-        logger.error('LSP', `Workspace path does not exist: ${this.config.workspacePath}`);
-        return false;
-      }
+      logger.info('LSPClient', `Starting language server: ${this.serverCommand}`);
 
-      // 启动语言服务器进程
-      this.process = spawn(this.config.command, this.config.args, {
-        cwd: this.config.workspacePath,
-        stdio: ['pipe', 'pipe', 'pipe'],
+      this.process = cp.spawn(this.serverCommand, this.serverArgs, {
+        stdio: ['pipe', 'pipe', 'pipe']
       });
 
-      // 创建消息连接
-      this.connection = createMessageConnection(
-        new StreamMessageReader(this.process.stdout!),
-        new StreamMessageWriter(this.process.stdin!)
-      );
-
-      // 设置错误处理
-      this.connection.onError((error) => {
-        logger.error('LSP', `Connection error: ${error}`);
+      this.process.stdout?.on('data', (data) => this.handleData(data));
+      this.process.stderr?.on('data', (data) => {
+        logger.debug('LSPClient', `Server stderr: ${data}`);
       });
 
-      this.connection.onClose(() => {
-        logger.info('LSP', 'Connection closed');
-        this.initialized = false;
+      this.process.on('error', (error) => {
+        logger.error('LSPClient', `Server error: ${error}`);
+        reject(error);
       });
 
-      // 监听诊断信息
-      this.connection.onNotification('textDocument/publishDiagnostics', (params) => {
-        this.diagnostics.set(params.uri, params.diagnostics);
+      this.process.on('exit', (code) => {
+        logger.info('LSPClient', `Server exited with code ${code}`);
+        this.emit('exit', code);
       });
 
-      this.connection.listen();
-
-      // 初始化
-      const initParams: InitializeParams = {
-        processId: process.pid,
-        rootUri: `file://${this.config.workspacePath}`,
-        capabilities: {
-          textDocument: {
-            synchronization: {
-              dynamicRegistration: false,
-              willSave: true,
-              willSaveWaitUntil: true,
-              didSave: true,
-            },
-            completion: {
-              dynamicRegistration: false,
-              completionItem: {
-                snippetSupport: true,
-                commitCharactersSupport: true,
-                documentationFormat: ['markdown', 'plaintext'],
-                deprecatedSupport: true,
-                preselectSupport: true,
-              },
-            },
-            hover: {
-              dynamicRegistration: false,
-              contentFormat: ['markdown', 'plaintext'],
-            },
-            definition: {
-              dynamicRegistration: false,
-              linkSupport: true,
-            },
-            documentSymbol: {
-              dynamicRegistration: false,
-              hierarchicalDocumentSymbolSupport: true,
-            },
-            codeAction: {
-              dynamicRegistration: false,
-            },
-            rename: {
-              dynamicRegistration: false,
-              prepareSupport: true,
-            },
-          },
-          workspace: {
-            workspaceFolders: true,
-            configuration: true,
-          },
-        },
-        workspaceFolders: [
-          {
-            uri: `file://${this.config.workspacePath}`,
-            name: path.basename(this.config.workspacePath),
-          },
-        ],
-      };
-
-      const result = await this.connection.sendRequest<InitializeResult>('initialize', initParams);
-      
-      if (result) {
-        await this.connection.sendNotification('initialized', {});
-        this.initialized = true;
-        logger.info('LSP', `${this.config.language} language server initialized`);
-        return true;
-      }
-
-      return false;
-    } catch (error) {
-      logger.error('LSP', `Failed to start language server: ${error}`);
-      return false;
-    }
+      // 等待服务器启动后初始化
+      setTimeout(async () => {
+        try {
+          await this.initialize();
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      }, 500);
+    });
   }
 
   /**
-   * 停止 LSP 服务器
+   * 停止语言服务器
    */
   async stop(): Promise<void> {
-    if (this.connection) {
-      try {
-        await this.connection.sendRequest('shutdown');
-        this.connection.sendNotification('exit');
-      } catch {
-        // 忽略关闭错误
-      }
-      this.connection.dispose();
-      this.connection = null;
+    if (!this.process) return;
+
+    try {
+      await this.sendRequest('shutdown', {});
+      this.sendNotification('exit', {});
+    } catch (error) {
+      logger.warn('LSPClient', `Error during shutdown: ${error}`);
     }
 
-    if (this.process) {
-      this.process.kill();
-      this.process = null;
-    }
-
+    this.process.kill();
+    this.process = null;
     this.initialized = false;
-    this.openDocuments.clear();
-    this.documentVersions.clear();
-    logger.info('LSP', `${this.config.language} language server stopped`);
   }
 
   /**
-   * 打开文档
+   * 发送初始化请求
    */
-  async openDocument(filePath: string, content: string, languageId: string): Promise<void> {
-    if (!this.initialized || !this.connection) return;
+  private async initialize(): Promise<void> {
+    const result = await this.sendRequest('initialize', {
+      processId: process.pid,
+      rootUri: this.rootUri,
+      capabilities: {
+        textDocument: {
+          synchronization: {
+            dynamicRegistration: false,
+            willSave: true,
+            willSaveWaitUntil: true,
+            didSave: true
+          },
+          completion: {
+            dynamicRegistration: false,
+            completionItem: {
+              snippetSupport: true,
+              commitCharactersSupport: true,
+              documentationFormat: ['markdown', 'plaintext'],
+              deprecatedSupport: true,
+              preselectSupport: true
+            }
+          },
+          hover: {
+            dynamicRegistration: false,
+            contentFormat: ['markdown', 'plaintext']
+          },
+          definition: { dynamicRegistration: false, linkSupport: true },
+          references: { dynamicRegistration: false },
+          documentSymbol: { dynamicRegistration: false, hierarchicalDocumentSymbolSupport: true },
+          codeAction: { dynamicRegistration: false },
+          rename: { dynamicRegistration: false },
+          diagnostics: { dynamicRegistration: false }
+        },
+        workspace: {
+          applyEdit: true,
+          workspaceEdit: { documentChanges: true },
+          didChangeConfiguration: { dynamicRegistration: false },
+          didChangeWatchedFiles: { dynamicRegistration: false }
+        }
+      }
+    });
 
-    const uri = `file://${filePath}`;
-    const version = 1;
+    this.serverCapabilities = result.capabilities || {};
+    this.initialized = true;
+    
+    // 发送initialized通知
+    this.sendNotification('initialized', {});
+    
+    logger.info('LSPClient', 'Language server initialized');
+    this.emit('initialized', result);
+  }
 
-    const params: DidOpenTextDocumentParams = {
+  /**
+   * 文本同步：打开文档
+   */
+  didOpen(uri: string, languageId: string, version: number, text: string): void {
+    this.sendNotification('textDocument/didOpen', {
       textDocument: {
-        uri,
+        uri: `file://${uri}`,
         languageId,
         version,
-        text: content,
-      },
-    };
-
-    await this.connection.sendNotification('textDocument/didOpen', params);
-    
-    this.openDocuments.add(uri);
-    this.documentVersions.set(uri, version);
-  }
-
-  /**
-   * 更新文档内容
-   */
-  async updateDocument(filePath: string, content: string): Promise<void> {
-    if (!this.initialized || !this.connection) return;
-
-    const uri = `file://${filePath}`;
-    const currentVersion = this.documentVersions.get(uri) || 0;
-    const newVersion = currentVersion + 1;
-
-    const params: DidChangeTextDocumentParams = {
-      textDocument: {
-        uri,
-        version: newVersion,
-      },
-      contentChanges: [
-        {
-          text: content,
-        },
-      ],
-    };
-
-    await this.connection.sendNotification('textDocument/didChange', params);
-    this.documentVersions.set(uri, newVersion);
-  }
-
-  /**
-   * 关闭文档
-   */
-  async closeDocument(filePath: string): Promise<void> {
-    if (!this.initialized || !this.connection) return;
-
-    const uri = `file://${filePath}`;
-
-    const params: DidCloseTextDocumentParams = {
-      textDocument: {
-        uri,
-      },
-    };
-
-    await this.connection.sendNotification('textDocument/didClose', params);
-    
-    this.openDocuments.delete(uri);
-    this.documentVersions.delete(uri);
-  }
-
-  /**
-   * 获取代码补全
-   */
-  async getCompletions(filePath: string, line: number, character: number): Promise<CodeSuggestion[]> {
-    if (!this.initialized || !this.connection) return [];
-
-    const uri = `file://${filePath}`;
-
-    const params: CompletionParams = {
-      textDocument: {
-        uri,
-      },
-      position: {
-        line,
-        character,
-      },
-    };
-
-    try {
-      const result = await this.connection.sendRequest<{
-        items?: CompletionItem[];
-        isIncomplete?: boolean;
-      }>('textDocument/completion', params);
-
-      if (!result || !result.items) return [];
-
-      return result.items.map((item) => ({
-        label: item.label,
-        detail: item.detail,
-        documentation: typeof item.documentation === 'string' 
-          ? item.documentation 
-          : item.documentation?.value,
-        insertText: item.insertText || item.label,
-        kind: this.mapCompletionKind(item.kind),
-      }));
-    } catch (error) {
-      logger.warn('LSP', `Failed to get completions: ${error}`);
-      return [];
-    }
-  }
-
-  /**
-   * 获取悬停提示
-   */
-  async getHover(filePath: string, line: number, character: number): Promise<string | null> {
-    if (!this.initialized || !this.connection) return null;
-
-    const uri = `file://${filePath}`;
-
-    const params: HoverParams = {
-      textDocument: {
-        uri,
-      },
-      position: {
-        line,
-        character,
-      },
-    };
-
-    try {
-      const result = await this.connection.sendRequest<Hover>('textDocument/hover', params);
-
-      if (!result || !result.contents) return null;
-
-      if (typeof result.contents === 'string') {
-        return result.contents;
-      } else if (Array.isArray(result.contents)) {
-        return result.contents.join('\n');
-      } else {
-        return result.contents.value;
+        text
       }
-    } catch (error) {
-      logger.warn('LSP', `Failed to get hover: ${error}`);
-      return null;
-    }
+    });
+  }
+
+  /**
+   * 文本同步：变更文档
+   */
+  didChange(uri: string, version: number, changes: { range?: Range; text: string }[]): void {
+    this.sendNotification('textDocument/didChange', {
+      textDocument: { uri: `file://${uri}`, version },
+      contentChanges: changes
+    });
+  }
+
+  /**
+   * 文本同步：保存文档
+   */
+  didSave(uri: string, text?: string): void {
+    this.sendNotification('textDocument/didSave', {
+      textDocument: { uri: `file://${uri}` },
+      text
+    });
+  }
+
+  /**
+   * 文本同步：关闭文档
+   */
+  didClose(uri: string): void {
+    this.sendNotification('textDocument/didClose', {
+      textDocument: { uri: `file://${uri}` }
+    });
   }
 
   /**
    * 跳转到定义
    */
-  async gotoDefinition(filePath: string, line: number, character: number): Promise<SymbolInfo | null> {
-    if (!this.initialized || !this.connection) return null;
-
-    const uri = `file://${filePath}`;
-
-    const params: DefinitionParams = {
-      textDocument: {
-        uri,
-      },
-      position: {
-        line,
-        character,
-      },
-    };
-
-    try {
-      const result = await this.connection.sendRequest<Location | Location[] | null>(
-        'textDocument/definition',
-        params
-      );
-
-      if (!result) return null;
-
-      const location = Array.isArray(result) ? result[0] : result;
-      
-      return {
-        name: '',
-        kind: 'definition',
-        location: {
-          file: location.uri.replace('file://', ''),
-          line: location.range.start.line,
-          character: location.range.start.character,
-        },
-      };
-    } catch (error) {
-      logger.warn('LSP', `Failed to get definition: ${error}`);
+  async goToDefinition(uri: string, position: Position): Promise<Location | Location[] | null> {
+    if (!this.serverCapabilities.definitionProvider) {
       return null;
     }
+    return this.sendRequest('textDocument/definition', {
+      textDocument: { uri: `file://${uri}` },
+      position
+    });
+  }
+
+  /**
+   * 查找引用
+   */
+  async findReferences(uri: string, position: Position): Promise<Location[] | null> {
+    if (!this.serverCapabilities.referencesProvider) {
+      return null;
+    }
+    return this.sendRequest('textDocument/references', {
+      textDocument: { uri: `file://${uri}` },
+      position,
+      context: { includeDeclaration: true }
+    });
+  }
+
+  /**
+   * 悬停提示
+   */
+  async hover(uri: string, position: Position): Promise<Hover | null> {
+    if (!this.serverCapabilities.hoverProvider) {
+      return null;
+    }
+    return this.sendRequest('textDocument/hover', {
+      textDocument: { uri: `file://${uri}` },
+      position
+    });
   }
 
   /**
    * 获取文档符号
    */
-  async getDocumentSymbols(filePath: string): Promise<SymbolInfo[]> {
-    if (!this.initialized || !this.connection) return [];
-
-    const uri = `file://${filePath}`;
-
-    const params: DocumentSymbolParams = {
-      textDocument: {
-        uri,
-      },
-    };
-
-    try {
-      const result = await this.connection.sendRequest<
-        (DocumentSymbol | SymbolInformation)[] | null
-      >('textDocument/documentSymbol', params);
-
-      if (!result) return [];
-
-      return result.map((symbol) => {
-        if ('location' in symbol) {
-          // SymbolInformation
-          return {
-            name: symbol.name,
-            kind: this.mapSymbolKind(symbol.kind),
-            location: {
-              file: symbol.location.uri.replace('file://', ''),
-              line: symbol.location.range.start.line,
-              character: symbol.location.range.start.character,
-            },
-            containerName: symbol.containerName,
-          };
-        } else {
-          // DocumentSymbol
-          return {
-            name: symbol.name,
-            kind: this.mapSymbolKind(symbol.kind),
-            location: {
-              file: filePath,
-              line: symbol.range.start.line,
-              character: symbol.range.start.character,
-            },
-            containerName: symbol.detail,
-          };
-        }
-      });
-    } catch (error) {
-      logger.warn('LSP', `Failed to get document symbols: ${error}`);
-      return [];
-    }
-  }
-
-  /**
-   * 重命名符号
-   */
-  async rename(filePath: string, line: number, character: number, newName: string): Promise<WorkspaceEdit | null> {
-    if (!this.initialized || !this.connection) return null;
-
-    const uri = `file://${filePath}`;
-
-    const params: RenameParams = {
-      textDocument: {
-        uri,
-      },
-      position: {
-        line,
-        character,
-      },
-      newName,
-    };
-
-    try {
-      const result = await this.connection.sendRequest<WorkspaceEdit | null>(
-        'textDocument/rename',
-        params
-      );
-      return result;
-    } catch (error) {
-      logger.warn('LSP', `Failed to rename: ${error}`);
+  async getDocumentSymbols(uri: string): Promise<DocumentSymbol[] | null> {
+    if (!this.serverCapabilities.documentSymbolProvider) {
       return null;
     }
+    return this.sendRequest('textDocument/documentSymbol', {
+      textDocument: { uri: `file://${uri}` }
+    });
   }
 
   /**
-   * 获取代码操作（快速修复）
+   * 代码补全
    */
-  async getCodeActions(filePath: string, startLine: number, startChar: number, endLine: number, endChar: number): Promise<CodeAction[]> {
-    if (!this.initialized || !this.connection) return [];
+  async complete(uri: string, position: Position): Promise<CompletionItem[] | null> {
+    if (!this.serverCapabilities.completionProvider) {
+      return null;
+    }
+    const result = await this.sendRequest('textDocument/completion', {
+      textDocument: { uri: `file://${uri}` },
+      position
+    });
+    
+    if (!result) return null;
+    if (Array.isArray(result)) return result;
+    if (result.items) return result.items;
+    return null;
+  }
 
-    const uri = `file://${filePath}`;
+  /**
+   * 代码动作
+   */
+  async codeAction(uri: string, range: Range, context: { diagnostics: Diagnostic[] }): Promise<CodeAction[] | null> {
+    if (!this.serverCapabilities.codeActionProvider) {
+      return null;
+    }
+    return this.sendRequest('textDocument/codeAction', {
+      textDocument: { uri: `file://${uri}` },
+      range,
+      context
+    });
+  }
 
-    const params: CodeActionParams = {
-      textDocument: {
-        uri,
-      },
-      range: {
-        start: { line: startLine, character: startChar },
-        end: { line: endLine, character: endChar },
-      },
-      context: {
-        diagnostics: this.diagnostics.get(uri) || [],
-      },
-    };
+  /**
+   * 重命名
+   */
+  async rename(uri: string, position: Position, newName: string): Promise<WorkspaceEdit | null> {
+    if (!this.serverCapabilities.renameProvider) {
+      return null;
+    }
+    return this.sendRequest('textDocument/rename', {
+      textDocument: { uri: `file://${uri}` },
+      position,
+      newName
+    });
+  }
 
-    try {
-      const result = await this.connection.sendRequest<(CodeAction | any)[] | null>(
-        'textDocument/codeAction',
+  /**
+   * 格式化文档
+   */
+  async formatDocument(uri: string, options?: { tabSize: number; insertSpaces: boolean }): Promise<TextEdit[] | null> {
+    if (!this.serverCapabilities.documentFormattingProvider) {
+      return null;
+    }
+    return this.sendRequest('textDocument/formatting', {
+      textDocument: { uri: `file://${uri}` },
+      options: options || { tabSize: 2, insertSpaces: true }
+    });
+  }
+
+  // ==================== 私有方法 ====================
+
+  private sendRequest(method: string, params: any): Promise<any> {
+    return new Promise((resolve, reject) => {
+      if (!this.process?.stdin) {
+        reject(new Error('Server not running'));
+        return;
+      }
+
+      const id = ++this.messageId;
+      const message: LSPMessage = {
+        jsonrpc: '2.0',
+        id,
+        method,
         params
-      );
-      return result?.filter((item): item is CodeAction => 'kind' in item) || [];
-    } catch (error) {
-      logger.warn('LSP', `Failed to get code actions: ${error}`);
-      return [];
+      };
+
+      this.pendingRequests.set(id, { resolve, reject });
+
+      // 设置超时
+      setTimeout(() => {
+        if (this.pendingRequests.has(id)) {
+          this.pendingRequests.delete(id);
+          reject(new Error(`Request ${method} timeout`));
+        }
+      }, 30000);
+
+      this.sendMessage(message);
+    });
+  }
+
+  private sendNotification(method: string, params: any): void {
+    if (!this.process?.stdin) return;
+
+    const message: LSPMessage = {
+      jsonrpc: '2.0',
+      method,
+      params
+    };
+
+    this.sendMessage(message);
+  }
+
+  private sendMessage(message: LSPMessage): void {
+    const content = JSON.stringify(message);
+    const headers = `Content-Length: ${Buffer.byteLength(content, 'utf8')}\r\n\r\n`;
+    
+    this.process?.stdin?.write(headers + content);
+    
+    logger.debug('LSPClient', `Sent: ${message.method || 'response'} (id: ${message.id})`);
+  }
+
+  private handleData(data: Buffer): void {
+    this.buffer += data.toString('utf8');
+
+    while (true) {
+      // 解析头部
+      const headerMatch = this.buffer.match(/Content-Length: (\d+)\r\n/);
+      if (!headerMatch) break;
+
+      const contentLength = parseInt(headerMatch[1], 10);
+      const headerEnd = this.buffer.indexOf('\r\n\r\n');
+      if (headerEnd === -1) break;
+
+      const messageStart = headerEnd + 4;
+      const messageEnd = messageStart + contentLength;
+
+      if (this.buffer.length < messageEnd) break;
+
+      // 提取并解析消息
+      const content = this.buffer.substring(messageStart, messageEnd);
+      this.buffer = this.buffer.substring(messageEnd);
+
+      try {
+        const message: LSPMessage = JSON.parse(content);
+        this.handleMessage(message);
+      } catch (error) {
+        logger.error('LSPClient', `Failed to parse message: ${error}`);
+      }
     }
   }
 
-  /**
-   * 获取诊断信息
-   */
-  getDiagnostics(filePath: string): Diagnostic[] {
-    const uri = `file://${filePath}`;
-    return this.diagnostics.get(uri) || [];
-  }
-
-  /**
-   * 检查是否已初始化
-   */
-  isInitialized(): boolean {
-    return this.initialized;
-  }
-
-  /**
-   * 映射补全项类型
-   */
-  private mapCompletionKind(kind?: number): string {
-    const kinds: Record<number, string> = {
-      1: 'text',
-      2: 'method',
-      3: 'function',
-      4: 'constructor',
-      5: 'field',
-      6: 'variable',
-      7: 'class',
-      8: 'interface',
-      9: 'module',
-      10: 'property',
-      11: 'unit',
-      12: 'value',
-      13: 'enum',
-      14: 'keyword',
-      15: 'snippet',
-      16: 'color',
-      17: 'file',
-      18: 'reference',
-      19: 'folder',
-      20: 'enumMember',
-      21: 'constant',
-      22: 'struct',
-      23: 'event',
-      24: 'operator',
-      25: 'typeParameter',
-    };
-    return kinds[kind || 1] || 'unknown';
-  }
-
-  /**
-   * 映射符号类型
-   */
-  private mapSymbolKind(kind: number): string {
-    const kinds: Record<number, string> = {
-      1: 'file',
-      2: 'module',
-      3: 'namespace',
-      4: 'package',
-      5: 'class',
-      6: 'method',
-      7: 'property',
-      8: 'field',
-      9: 'constructor',
-      10: 'enum',
-      11: 'interface',
-      12: 'function',
-      13: 'variable',
-      14: 'constant',
-      15: 'string',
-      16: 'number',
-      17: 'boolean',
-      18: 'array',
-      19: 'object',
-      20: 'key',
-      21: 'null',
-      22: 'enumMember',
-      23: 'struct',
-      24: 'event',
-      25: 'operator',
-      26: 'typeParameter',
-    };
-    return kinds[kind] || 'unknown';
+  private handleMessage(message: LSPMessage): void {
+    if (message.id !== undefined) {
+      // 响应消息
+      const pending = this.pendingRequests.get(message.id as number);
+      if (pending) {
+        this.pendingRequests.delete(message.id as number);
+        if (message.error) {
+          pending.reject(new Error(message.error.message));
+        } else {
+          pending.resolve(message.result);
+        }
+      }
+    } else if (message.method) {
+      // 服务器通知
+      this.emit('notification', message);
+      
+      if (message.method === 'textDocument/publishDiagnostics') {
+        this.emit('diagnostics', message.params);
+      }
+    }
   }
 }
 
-/**
- * LSP 管理器 - 管理多个语言服务器
- */
-export class LSPManager {
-  private clients: Map<LSPLanguage, LSPClient> = new Map();
-
-  /**
-   * 创建 TypeScript 语言服务器
-   */
-  async createTypeScriptClient(workspacePath: string): Promise<LSPClient | null> {
-    // 尝试多种方式启动 TypeScript 语言服务器
-    const candidates = [
-      { cmd: 'typescript-language-server', args: ['--stdio'] },
-      { cmd: 'npx', args: ['typescript-language-server', '--stdio'] },
-      { cmd: 'node', args: [require.resolve('typescript/lib/tsserver.js'), '--syntaxOnly'] },
-    ];
-
-    for (const candidate of candidates) {
-      try {
-        const client = new LSPClient({
-          language: 'typescript',
-          command: candidate.cmd,
-          args: candidate.args,
-          workspacePath,
-        });
-
-        const success = await client.start();
-        if (success) {
-          this.clients.set('typescript', client);
-          return client;
-        }
-      } catch {
-        continue;
-      }
-    }
-
-    logger.warn('LSP', 'Failed to start TypeScript language server');
-    return null;
-  }
-
-  /**
-   * 创建 Python 语言服务器
-   */
-  async createPythonClient(workspacePath: string): Promise<LSPClient | null> {
-    const candidates = [
-      { cmd: 'pylsp', args: [] },
-      { cmd: 'python-lsp-server', args: [] },
-      { cmd: 'pyls', args: [] },
-    ];
-
-    for (const candidate of candidates) {
-      try {
-        const client = new LSPClient({
-          language: 'python',
-          command: candidate.cmd,
-          args: candidate.args,
-          workspacePath,
-        });
-
-        const success = await client.start();
-        if (success) {
-          this.clients.set('python', client);
-          return client;
-        }
-      } catch {
-        continue;
-      }
-    }
-
-    logger.warn('LSP', 'Failed to start Python language server');
-    return null;
-  }
-
-  /**
-   * 获取客户端
-   */
-  getClient(language: LSPLanguage): LSPClient | undefined {
-    return this.clients.get(language);
-  }
-
-  /**
-   * 停止所有客户端
-   */
-  async stopAll(): Promise<void> {
-    for (const [language, client] of this.clients) {
-      await client.stop();
-    }
-    this.clients.clear();
-  }
-}
-
-// 单例导出
-export const lspManager = new LSPManager();
+export default LSPClient;

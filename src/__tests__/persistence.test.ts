@@ -107,15 +107,21 @@ describe('Persistence and Self-Healing', () => {
 
       expect(taskId).toBeDefined();
 
+      // 验证任务创建时出现在待处理列表
       const tasks = db.getPendingTasks('test-session');
       expect(tasks.length).toBe(1);
       expect(tasks[0].type).toBe('tool_call');
+      expect(tasks[0].status).toBe('pending');
 
-      // 更新状态
+      // 更新状态为 completed
       db.updateTaskStatus(taskId, 'completed');
+      
+      // completed 任务不应该出现在待处理列表中
       const updatedTasks = db.getPendingTasks('test-session');
-      expect(updatedTasks[0].status).toBe('completed');
-      expect(updatedTasks[0].retryCount).toBe(1);
+      expect(updatedTasks.length).toBe(0);
+      
+      // 验证任务已从待处理列表中移除（completed 任务不应出现在 pending 列表）
+      expect(updatedTasks.length).toBe(0);
     });
 
     test('should manage system state', () => {

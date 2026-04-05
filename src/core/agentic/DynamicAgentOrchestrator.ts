@@ -76,7 +76,7 @@ interface SubTask {
 }
 
 /** 复杂度评估结果 */
-interface ComplexityAnalysis {
+export interface ComplexityAnalysis {
   score: number; // 0-100
   level: 'simple' | 'moderate' | 'complex' | 'very_complex';
   reasons: string[];

@@ -11,6 +11,11 @@ import {
   createExecTool,
   createGrepTool,
   projectUnderstandTool,
+  projectUnderstandingTools,
+  codeAnalysisTools,
+  gitTools,
+  webTools,
+  refactorTools
 } from './definitions';
 
 /**
@@ -167,18 +172,45 @@ export class ToolRegistry {
   // ==================== 核心工具注册 ====================
 
   private registerCoreTools(): void {
-    // 不需要 workingDir 的工具
+    // 基础工具（不需要 workingDir）
     this.register(listSkillsTool, 'core');
     this.register(fetchTool, 'core');
     this.register(webFetchTool, 'core');
 
-    // 需要 workingDir 的工具
+    // 文件操作工具（需要 workingDir）
     this.register(createReadTool(this.workingDir), 'core');
     this.register(createWriteTool(this.workingDir), 'core');
     this.register(createEditTool(this.workingDir), 'core');
     this.register(createExecTool(this.workingDir), 'core');
     this.register(createGrepTool(this.workingDir), 'core');
+
+    // 项目理解工具
     this.register(projectUnderstandTool, 'core');
+    for (const tool of projectUnderstandingTools) {
+      this.register(tool, 'core');
+    }
+
+    // 代码分析工具
+    for (const tool of codeAnalysisTools) {
+      this.register(tool, 'core');
+    }
+
+    // Git 工具
+    for (const tool of gitTools) {
+      this.register(tool, 'core');
+    }
+
+    // Web 工具
+    for (const tool of webTools) {
+      this.register(tool, 'core');
+    }
+
+    // 重构工具
+    for (const tool of refactorTools) {
+      this.register(tool, 'core');
+    }
+
+    logger.info('ToolRegistry', `Registered ${this.tools.size} tools`);
   }
 
   private convertParameters(parameters: any[]): Record<string, any> {
@@ -193,6 +225,20 @@ export class ToolRegistry {
       }
     }
     return result;
+  }
+
+  /**
+   * 获取工具统计信息
+   */
+  getStats(): { total: number; bySource: Record<string, number> } {
+    const bySource: Record<string, number> = {};
+    for (const [name, source] of this.toolSources.entries()) {
+      bySource[source] = (bySource[source] || 0) + 1;
+    }
+    return {
+      total: this.tools.size,
+      bySource
+    };
   }
 }
 
