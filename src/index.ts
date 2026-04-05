@@ -22,6 +22,7 @@ import { TaskScheduler, taskScheduler } from './core/scheduler/TaskScheduler';
 import { sessionSnapshotManager } from './core/session/SessionSnapshot';
 import { sessionPersistence } from './core/persistence/SessionPersistence';
 import { selfHealing } from './core/resilience/SelfHealing';
+import { LoopDetector, loopDetector } from './core/resilience/LoopDetector';
 import { kairosEngine, KairosEngine } from './core/kairos/KairosEngine';
 import { DynamicAgentOrchestrator } from './core/agentic/DynamicAgentOrchestrator';
 import {
@@ -64,6 +65,7 @@ export * from './core/intent';
 export { StarUpDatabase, SessionRecord, SessionSnapshot as DBSessionSnapshot, PendingTask, SystemState, starupDB } from './core/persistence/Database';
 export { SessionPersistence, PersistedSession, sessionPersistence } from './core/persistence/SessionPersistence';
 export { SelfHealingSystem, selfHealing } from './core/resilience/SelfHealing';
+export { LoopDetector, loopDetector } from './core/resilience/LoopDetector';
 export * from './core/kairos/KairosEngine';
 export * from './core/orchestration/AgentTeam';
 export * from './core/lsp/LSPClient';
@@ -93,6 +95,7 @@ export class StarUpCore {
   agentOrchestrator: DynamicAgentOrchestrator | null = null;
   projectUnderstanding: import('./core/project/AdvancedProjectUnderstanding').AdvancedProjectUnderstanding | null = null;
   conversationObservers: Map<string, ConversationObserver> = new Map(); // 每个会话一个观察器
+  loopDetectors: Map<string, LoopDetector> = new Map(); // 每个会话一个循环检测器
   onScheduledTaskComplete?: (content: string) => void;
   private config: SystemConfig;
   private systemPrompt: string | null = null;
@@ -470,6 +473,13 @@ export class StarUpCore {
       logger.debug('StarUpCore', 'Failed to inject memories:', e);
     }
 
+    // 获取或创建该会话的循环检测器
+    let loopDetector = this.loopDetectors.get(sessionId);
+    if (!loopDetector) {
+      loopDetector = new LoopDetector();
+      this.loopDetectors.set(sessionId, loopDetector);
+    }
+
     const tools = this.toolRegistry.getToolDescriptions();
     const maxIterations = 20000000;
     let reactiveCompactAttempted = false;
@@ -637,6 +647,9 @@ export class StarUpCore {
 
         const result = await this.toolRegistry.execute(toolName, toolArgs, session);
         
+        // 记录工具调用到循环检测器
+        loopDetector.recordToolCall(toolName, toolArgs, result);
+        
         // 记录工具调用结果到观察器（用于错误学习）
         const observer = this.conversationObservers.get(sessionId);
         if (observer) {
@@ -653,6 +666,27 @@ export class StarUpCore {
           tool_call_id: toolCall.id,
           timestamp: Date.now(),
         });
+      }
+
+      // 检查是否陷入循环
+      const loopResult = loopDetector.detectLoop();
+      if (loopResult.isLooping && loopResult.suggestion) {
+        logger.warn('StarUpCore', 
+          `Loop detected in session ${sessionId}: ${loopResult.type}, count: ${loopResult.repeatCount}`
+        );
+        
+        // 添加系统消息提醒 LLM
+        this.sessionManager.addMessage(sessionId, {
+          role: 'system',
+          content: loopResult.suggestion,
+          timestamp: Date.now(),
+        });
+        
+        // 如果应该强制中断，跳出循环
+        if (loopResult.shouldForceBreak) {
+          logger.error('StarUpCore', `Force breaking loop in session ${sessionId}`);
+          break;
+        }
       }
     }
 
@@ -712,6 +746,9 @@ export class StarUpCore {
     
     // 清理对话观察器
     this.conversationObservers.clear();
+    
+    // 清理循环检测器
+    this.loopDetectors.clear();
     
     await this.scheduler.shutdown();
     this.skillRegistry.stopAutoScan();
