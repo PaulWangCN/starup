@@ -318,6 +318,11 @@ export class TerminalChat {
           onToolCall: (name, args) => {
             this.stopSpinner();
             console.log(chalk.yellow(`  → 调用工具: ${name}`));
+            // 显示具体参数
+            if (args && Object.keys(args).length > 0) {
+              const formattedArgs = this.formatToolArgs(name, args);
+              console.log(chalk.gray(`     ${formattedArgs}`));
+            }
           },
           onToolResult: (name, result) => {
             const success = result.success !== false;
@@ -574,6 +579,73 @@ export class TerminalChat {
       console.log();
     } catch (error) {
       this.renderer.error(`分析失败: ${error}`);
+    }
+  }
+
+  /**
+   * 格式化工具参数显示
+   */
+  private formatToolArgs(toolName: string, args: any): string {
+    if (!args || typeof args !== 'object') {
+      return '';
+    }
+
+    // 针对不同工具的格式化
+    switch (toolName) {
+      case 'Shell':
+      case 'exec':
+        return `命令: ${args.command || args.cmd || ''}`;
+      
+      case 'ReadFile':
+      case 'read':
+        return `文件: ${args.path || args.file || ''}`;
+      
+      case 'WriteFile':
+      case 'write':
+        return `写入: ${args.path || args.file || ''}`;
+      
+      case 'Grep':
+      case 'grep':
+        return `搜索: "${args.pattern || ''}" ${args.path ? `in ${args.path}` : ''}`;
+      
+      case 'Glob':
+      case 'glob':
+        return `匹配: ${args.pattern || ''}`;
+      
+      case 'StrReplaceFile':
+      case 'edit':
+        return `编辑: ${args.path || ''}`;
+      
+      case 'FetchURL':
+      case 'fetch':
+        return `URL: ${args.url || ''}`;
+      
+      case 'SearchWeb':
+      case 'web':
+      case 'web_search':
+        return `查询: "${args.query || ''}"`;
+      
+      case 'Agent':
+        return `子代理: ${args.description || args.agent_id || ''}`;
+      
+      default:
+        // 默认显示关键参数
+        const keyParams = ['path', 'file', 'command', 'cmd', 'pattern', 'query', 'url', 'name'];
+        for (const key of keyParams) {
+          if (args[key]) {
+            return `${key}: ${args[key]}`;
+          }
+        }
+        // 如果没有关键参数，显示第一个参数
+        const firstKey = Object.keys(args)[0];
+        if (firstKey) {
+          const value = args[firstKey];
+          if (typeof value === 'string' && value.length > 50) {
+            return `${firstKey}: ${value.substring(0, 50)}...`;
+          }
+          return `${firstKey}: ${value}`;
+        }
+        return '';
     }
   }
 
