@@ -1,48 +1,67 @@
 #!/usr/bin/env node
 /**
  * StarUp AI Agent - Ink UI 入口
- * 现代化终端界面，支持实时对话、工具调用展示、打断功能
  */
 
-// 全局错误处理 - 防止进程崩溃
-process.on('uncaughtException', (error) => {
-  console.error('[FATAL] Uncaught Exception:', error);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
-});
+import { setupGlobalErrorHandling, CrashLogger } from '../utils/CrashLogger.js';
+setupGlobalErrorHandling();
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { render, Box, Text, useInput, useApp } from 'ink';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-
-// 加载环境变量
 import dotenv from 'dotenv';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 dotenv.config({ path: join(__dirname, '../../.env') });
 
-// Env loaded
-
-// 动态导入核心模块（使用 createRequire 兼容 CJS）
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
-const loadCore = async () => {
-  return require('../../dist/index.js');
-};
+const loadCore = async () => require('../../dist/index.js');
 
 interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   timestamp: number;
-  metadata?: {
-    toolName?: string;
-    toolArgs?: any;
-  };
+}
+
+// 加载 system prompt 的辅助函数
+async function loadSystemPrompt(core: any): Promise<string> {
+  try {
+    const fs = require('fs/promises');
+    const path = require('path');
+    
+    const promptFiles = ['AGENTS.md', 'SOUL.md', 'IDENTITY.md', 'USER.md'];
+    const agentPath = path.join(process.cwd(), '.starup');
+    
+    const contents: string[] = [];
+    for (const filename of promptFiles) {
+      const filePath = path.join(agentPath, filename);
+      try {
+        const content = await fs.readFile(filePath, 'utf-8');
+        contents.push(`=== ${filename} ===\n${content}`);
+      } catch (e) {
+        // 文件不存在，跳过
+      }
+    }
+    
+    // 添加工具信息
+    const toolRegistry = core.toolRegistry;
+    const tools = toolRegistry ? toolRegistry.getAll() : [];
+    const toolDescriptions = tools.map((t: any) => `- ${t.name}: ${t.description}`).join('\n');
+    
+    if (toolDescriptions) {
+      contents.push(`=== 可用工具 ===\n${toolDescriptions}`);
+    }
+    
+    return contents.join('\n\n');
+  } catch (error) {
+    console.error('Failed to load system prompt:', error);
+    return '你是 StarUp AI，一个专业的 AI 助手。';
+  }
 }
 
 // 主应用组件
@@ -60,18 +79,21 @@ const App: React.FC = () => {
   const [showHelp, setShowHelp] = useState(false);
   const [isReady, setIsReady] = useState(false);
 
-  // 初始化
+  // 初始化 core
   useEffect(() => {
     const init = async () => {
       try {
         const coreModule = await loadCore();
         const StarUpCore = coreModule.StarUpCore;
-        
         const newCore = new StarUpCore();
         await newCore.initialize();
         setCore(newCore);
 
-        const mainSession = newCore.sessionManager.initializeMainSession();
+        // 加载 system prompt
+        const systemPrompt = await loadSystemPrompt(newCore);
+        
+        // 初始化会话时传入 system prompt
+        const mainSession = newCore.sessionManager.initializeMainSession(systemPrompt);
         setSessionId(mainSession.id);
         newCore.registerSession(mainSession.id);
 
@@ -79,18 +101,13 @@ const App: React.FC = () => {
         setIsReady(true);
 
         addMessage({
-          id: generateId('welcome'),
+          id: `welcome-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           role: 'system',
           content: 'StarUp AI Agent Started\nType /help for help, Ctrl+C to exit',
           timestamp: Date.now(),
         });
       } catch (error) {
-        addMessage({
-          id: generateId('init-error'),
-          role: 'system',
-          content: `Init failed: ${error}`,
-          timestamp: Date.now(),
-        });
+        console.error('Init error:', error);
         setIsReady(true);
       }
     };
@@ -98,17 +115,10 @@ const App: React.FC = () => {
     init();
   }, []);
 
-  // 生成唯一 ID
-  const generateId = useCallback((prefix: string) => {
-    return `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  }, []);
-
-  // 添加消息
   const addMessage = useCallback((message: Message) => {
     setMessages(prev => [...prev, message]);
   }, []);
 
-  // 更新最后一条消息（流式）
   const updateLastMessage = useCallback((content: string) => {
     setMessages(prev => {
       const newMessages = [...prev];
@@ -120,7 +130,6 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // 处理提交
   const handleSubmit = useCallback(async () => {
     if (!inputValue.trim() || !core || !sessionId || isProcessing) return;
 
@@ -133,7 +142,7 @@ const App: React.FC = () => {
     }
 
     addMessage({
-      id: `user-${Date.now()}`,
+      id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       role: 'user',
       content: text,
       timestamp: Date.now(),
@@ -144,9 +153,8 @@ const App: React.FC = () => {
     setIsProcessing(true);
     setCurrentTool(null);
 
-    const assistantMsgId = generateId('assistant');
     addMessage({
-      id: assistantMsgId,
+      id: `assistant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       role: 'assistant',
       content: '',
       timestamp: Date.now(),
@@ -173,7 +181,7 @@ const App: React.FC = () => {
     } catch (error: any) {
       if (!controller.signal.aborted) {
         addMessage({
-          id: generateId('error'),
+          id: `error-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           role: 'system',
           content: `Error: ${error.message || error}`,
           timestamp: Date.now(),
@@ -186,7 +194,6 @@ const App: React.FC = () => {
     }
   }, [inputValue, core, sessionId, isProcessing]);
 
-  // 处理命令
   const handleCommand = async (command: string) => {
     const parts = command.slice(1).split(' ');
     const cmd = parts[0];
@@ -205,7 +212,7 @@ const App: React.FC = () => {
         break;
       case 'status':
         addMessage({
-          id: generateId('cmd'),
+          id: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           role: 'system',
           content: `Skills: ${status.skills} | Tools: ${status.tools}`,
           timestamp: Date.now(),
@@ -213,7 +220,7 @@ const App: React.FC = () => {
         break;
       default:
         addMessage({
-          id: `cmd-${Date.now()}`,
+          id: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           role: 'system',
           content: `Unknown: ${cmd}`,
           timestamp: Date.now(),
@@ -221,14 +228,13 @@ const App: React.FC = () => {
     }
   };
 
-  // 停止生成
   const handleStop = useCallback(() => {
     if (abortController) {
       abortController.abort();
       setAbortController(null);
       setIsProcessing(false);
       addMessage({
-        id: generateId('stop'),
+        id: `stop-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         role: 'system',
         content: 'Stopped',
         timestamp: Date.now(),
@@ -236,19 +242,19 @@ const App: React.FC = () => {
     }
   }, [abortController]);
 
-  // 键盘处理
   useInput((input, key) => {
+    // 只处理真正的 Ctrl+C，忽略其他情况
+    if (key.ctrl && input === 'c') {
+      exit();
+      return;
+    }
+
     if (key.return) {
       if (isProcessing) {
         handleStop();
       } else {
         handleSubmit();
       }
-      return;
-    }
-
-    if (key.ctrl && input === 'c') {
-      exit();
       return;
     }
 
@@ -271,13 +277,11 @@ const App: React.FC = () => {
 
   return (
     <Box flexDirection="column" height="100%">
-      {/* Header */}
       <Box borderStyle="single" borderColor="cyan" paddingX={1} justifyContent="space-between">
         <Text bold color="cyan">StarUp AI Agent</Text>
         <Text color="gray">Skills:{status.skills} Tools:{status.tools}</Text>
       </Box>
 
-      {/* Help */}
       {showHelp && (
         <Box marginY={1} borderStyle="double" borderColor="yellow" padding={1}>
           <Box flexDirection="column">
@@ -288,7 +292,6 @@ const App: React.FC = () => {
         </Box>
       )}
 
-      {/* Messages */}
       <Box flexDirection="column" flexGrow={1} padding={1}>
         {messages.map((msg) => (
           <MessageItem key={msg.id} message={msg} />
@@ -300,7 +303,6 @@ const App: React.FC = () => {
         )}
       </Box>
 
-      {/* Input */}
       <Box borderStyle="single" borderColor={isProcessing ? "red" : "green"} paddingX={1}>
         <Box width="100%" justifyContent="space-between">
           <Box flexGrow={1}>
@@ -312,7 +314,6 @@ const App: React.FC = () => {
             {!isProcessing && <Text color="gray">_</Text>}
           </Box>
           
-          {/* Button */}
           <Box marginLeft={2}>
             {isProcessing ? (
               <Text backgroundColor="red" color="white" bold> STOP </Text>
@@ -334,7 +335,6 @@ const App: React.FC = () => {
   );
 };
 
-// Message Item
 const MessageItem: React.FC<{ message: Message }> = ({ message }) => {
   const time = new Date(message.timestamp).toLocaleTimeString('en-US', {
     hour: '2-digit',

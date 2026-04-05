@@ -3,16 +3,11 @@
  * v1.3-simple: 大道至简版
  */
 
-// 全局错误处理 - 防止进程崩溃
-process.on('uncaughtException', (error) => {
-  console.error('[FATAL] Uncaught Exception:', error);
-  // 记录错误但不退出，让系统有机会恢复
-});
+// 导入崩溃日志记录器
+import { setupGlobalErrorHandling, CrashLogger } from './utils/CrashLogger';
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
-  // 记录错误但不退出
-});
+// 设置全局错误处理（必须在最前面）
+setupGlobalErrorHandling();
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -172,8 +167,8 @@ export class StarUpCore {
     logger.info('StarUpCore', 'Loading skills...');
     await this.skillRegistry.initialize();
     
-    // 初始化项目理解引擎
-    if (this.llmService) {
+    // 初始化项目理解引擎（可通过环境变量禁用）
+    if (this.llmService && process.env.DISABLE_PROJECT_ANALYSIS !== 'true') {
       const { initProjectUnderstanding } = await import('./core/project/AdvancedProjectUnderstanding');
       this.projectUnderstanding = initProjectUnderstanding(process.cwd(), this.llmService);
       
@@ -186,7 +181,8 @@ export class StarUpCore {
           `${context.metadata.databaseEntities?.length || 0} entities`
         );
       }).catch(err => {
-        logger.warn('StarUpCore', `Project analysis failed: ${err}`);
+        // 静默处理，避免启动时显示错误（后台分析非关键功能）
+        logger.debug('StarUpCore', `Project analysis skipped: ${err}`);
       });
     }
 

@@ -16,6 +16,6 @@
     "sourceMap": true,
     "jsx": "react-jsx"
   },
-  "include": ["src/ink-ui/**/*", "src/types/**/*"],
+  "include": ["src/ink-ui/**/*", "src/types/**/*", "src/utils/CrashLogger.ts"],
   "exclude": ["node_modules", "dist"]
 }

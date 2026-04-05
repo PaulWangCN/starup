@@ -58,3 +58,6 @@ temp/
 
 # But keep example skill's dist
 !skills/**/dist/
+
+# log
+.starup/crash-logs/*
