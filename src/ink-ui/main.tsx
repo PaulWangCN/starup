@@ -79,14 +79,14 @@ const App: React.FC = () => {
         setIsReady(true);
 
         addMessage({
-          id: 'welcome',
+          id: generateId('welcome'),
           role: 'system',
           content: 'StarUp AI Agent Started\nType /help for help, Ctrl+C to exit',
           timestamp: Date.now(),
         });
       } catch (error) {
         addMessage({
-          id: 'error',
+          id: generateId('init-error'),
           role: 'system',
           content: `Init failed: ${error}`,
           timestamp: Date.now(),
@@ -96,6 +96,11 @@ const App: React.FC = () => {
     };
 
     init();
+  }, []);
+
+  // 生成唯一 ID
+  const generateId = useCallback((prefix: string) => {
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }, []);
 
   // 添加消息
@@ -139,7 +144,7 @@ const App: React.FC = () => {
     setIsProcessing(true);
     setCurrentTool(null);
 
-    const assistantMsgId = `assistant-${Date.now()}`;
+    const assistantMsgId = generateId('assistant');
     addMessage({
       id: assistantMsgId,
       role: 'assistant',
@@ -168,7 +173,7 @@ const App: React.FC = () => {
     } catch (error: any) {
       if (!controller.signal.aborted) {
         addMessage({
-          id: `error-${Date.now()}`,
+          id: generateId('error'),
           role: 'system',
           content: `Error: ${error.message || error}`,
           timestamp: Date.now(),
@@ -200,7 +205,7 @@ const App: React.FC = () => {
         break;
       case 'status':
         addMessage({
-          id: `cmd-${Date.now()}`,
+          id: generateId('cmd'),
           role: 'system',
           content: `Skills: ${status.skills} | Tools: ${status.tools}`,
           timestamp: Date.now(),
@@ -223,7 +228,7 @@ const App: React.FC = () => {
       setAbortController(null);
       setIsProcessing(false);
       addMessage({
-        id: `stop-${Date.now()}`,
+        id: generateId('stop'),
         role: 'system',
         content: 'Stopped',
         timestamp: Date.now(),
