@@ -13,10 +13,9 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "jsx": "react-jsx",
     "moduleResolution": "node",
     "ignoreDeprecations": "5.0"
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "src/ink-ui", "src/app.tsx", "src/ui"]
+  "exclude": ["node_modules", "dist"]
 }
