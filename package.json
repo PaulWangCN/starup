@@ -1,6 +1,6 @@
 {
   "name": "starup",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "AI助手运行时环境与集成平台",
   "main": "dist/index.js",
   "scripts": {
@@ -9,8 +9,7 @@
     "start": "node dist/index.js",
     "gateway": "ts-node src/gatewayServer.ts",
     "gateway:prod": "node dist/gatewayServer.js",
-    "chat": "ts-node src/cli/EnhancedChat.ts",
-    "chat:legacy": "ts-node src/cli.ts",
+    "chat": "node src/cli.mjs",
     "test": "jest"
   },
   "keywords": [
@@ -57,6 +56,7 @@
     "@types/ora": "^3.1.0",
     "jest": "^30.3.0",
     "ts-jest": "^29.4.9",
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0"
   }
 }

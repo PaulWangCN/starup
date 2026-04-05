@@ -11,6 +11,7 @@ yarn.lock
 
 # Build output
 dist/
+dist-ink/
 build/
 *.js.map
 *.tsbuildinfo
@@ -47,6 +48,9 @@ temp/
 
 # Session snapshots
 .starup/snapshots/
+.starup/*.db
+.starup/*.db-shm
+.starup/*.db-wal
 
 # Skills index (auto-generated)
 .starup/skills_index.md

@@ -1,22 +1,21 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
+    "target": "ES2022",
     "module": "ES2020",
     "moduleResolution": "bundler",
-    "lib": ["ES2020"],
+    "lib": ["ES2022"],
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
+    "declaration": false,
     "sourceMap": true,
-    "jsx": "react-jsx",
-    "allowSyntheticDefaultImports": true
+    "jsx": "react-jsx"
   },
-  "include": ["src/ui/**/*"],
+  "include": ["src/ink-ui/**/*", "src/types/**/*"],
   "exclude": ["node_modules", "dist"]
 }
