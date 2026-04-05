@@ -3,6 +3,17 @@
  * v1.3-simple: 大道至简版
  */
 
+// 全局错误处理 - 防止进程崩溃
+process.on('uncaughtException', (error) => {
+  console.error('[FATAL] Uncaught Exception:', error);
+  // 记录错误但不退出，让系统有机会恢复
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
+  // 记录错误但不退出
+});
+
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { logger } from './utils/Logger';

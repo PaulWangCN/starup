@@ -4,6 +4,15 @@
  * 统一控制平面与通信枢纽
  */
 
+// 全局错误处理
+process.on('uncaughtException', (error) => {
+  console.error('[FATAL] Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 import * as dotenv from 'dotenv';
 import { Gateway } from './gateway';
 

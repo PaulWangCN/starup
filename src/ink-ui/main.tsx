@@ -4,6 +4,15 @@
  * 现代化终端界面，支持实时对话、工具调用展示、打断功能
  */
 
+// 全局错误处理 - 防止进程崩溃
+process.on('uncaughtException', (error) => {
+  console.error('[FATAL] Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { render, Box, Text, useInput, useApp } from 'ink';
 import { fileURLToPath } from 'url';
