@@ -4,6 +4,7 @@ import { Renderer } from './Renderer';
 import { StarUpCore } from '../index';
 import { PromptAssembler, createDefaultConfig, RuntimeContext } from '../core/prompt/PromptAssembler';
 import { logger } from '../utils/Logger';
+import { metricService } from '../core/metrics/MetricService';
 
 /**
  * 终端聊天界面
@@ -402,6 +403,10 @@ export class TerminalChat {
         await this.enterMultiLineMode();
         return true;
 
+      case 'metrics':
+        this.showMetrics(args);
+        return true;
+
       default:
         this.renderer.error(`未知命令: ${cmd}`);
         return true;
@@ -607,6 +612,7 @@ export class TerminalChat {
   /agents, /team  显示 Agent Team 状态
   /analyze <任务> 分析任务复杂度
   /m, /multi      进入多行输入模式
+  /metrics [days] 显示监控统计 (默认 7 天)
 
 直接输入消息与 AI 对话。
 复杂任务将自动组建 Agent Team 协作处理。
@@ -878,8 +884,78 @@ export class TerminalChat {
   /**
    * 自动补全
    */
+  /**
+   * 显示监控统计
+   */
+  private showMetrics(args: string[]): void {
+    const days = parseInt(args[0]) || 7;
+    
+    console.log();
+    console.log(chalk.bold('📊 StarUp 监控统计'));
+    console.log(chalk.gray('─'.repeat(60)));
+    
+    // 工具统计
+    const toolStats = metricService.getToolStats(days);
+    console.log(chalk.cyan('\n🔧 工具调用统计'));
+    console.log(`   统计周期: 最近 ${days} 天`);
+    console.log(`   总计: ${toolStats.total} 次调用`);
+    console.log(`   成功: ${chalk.green(toolStats.success)} (${((toolStats.success/toolStats.total)*100).toFixed(1)}%)`);
+    console.log(`   失败: ${chalk.red(toolStats.failed)} (${((toolStats.failed/toolStats.total)*100).toFixed(1)}%)`);
+    
+    if (toolStats.byTool.length > 0) {
+      console.log(chalk.gray('\n   工具使用排行:'));
+      console.log(chalk.gray('   ' + '─'.repeat(50)));
+      console.log(chalk.gray(`   ${'排名'.padEnd(4)} ${'工具名'.padEnd(20)} ${'调用次数'.padEnd(10)} ${'失败率'.padEnd(10)} ${'平均耗时'.padEnd(10)}`));
+      console.log(chalk.gray('   ' + '─'.repeat(50)));
+      
+      toolStats.byTool.slice(0, 10).forEach((tool, i) => {
+        const failRate = tool.fail_count > 0 
+          ? chalk.red(`${((tool.fail_count/tool.total_calls)*100).toFixed(1)}%`) 
+          : chalk.green('0%');
+        const avgTime = `${Math.round(tool.avg_duration_ms)}ms`;
+        console.log(`   ${String(i+1).padEnd(4)} ${tool.tool_name.padEnd(20)} ${String(tool.total_calls).padEnd(10)} ${failRate.padEnd(10)} ${avgTime.padEnd(10)}`);
+      });
+    }
+    
+    if (toolStats.errors.length > 0) {
+      console.log(chalk.yellow('\n   ⚠️ 主要错误类型:'));
+      toolStats.errors.slice(0, 5).forEach((err, i) => {
+        console.log(`      ${i+1}. ${chalk.red(err.error_type)}: ${err.error_count} 次`);
+        console.log(`         影响工具: ${err.affected_tools}`);
+      });
+    }
+    
+    // Skill 统计
+    const skillStats = metricService.getSkillStats(days);
+    console.log(chalk.cyan('\n\n🎯 Skill 执行统计'));
+    console.log(`   总计: ${skillStats.total} 次执行`);
+    console.log(`   成功: ${chalk.green(skillStats.success)} (${((skillStats.success/skillStats.total)*100).toFixed(1)}%)`);
+    console.log(`   失败: ${chalk.red(skillStats.failed)} (${((skillStats.failed/skillStats.total)*100).toFixed(1)}%)`);
+    
+    if (skillStats.byRole.length > 0) {
+      console.log(chalk.gray('\n   Subagent 角色效率:'));
+      console.log(chalk.gray('   ' + '─'.repeat(55)));
+      console.log(chalk.gray(`   ${'角色'.padEnd(15)} ${'执行次数'.padEnd(10)} ${'平均步数'.padEnd(10)} ${'平均工具'.padEnd(10)} ${'成功率'.padEnd(10)}`));
+      console.log(chalk.gray('   ' + '─'.repeat(55)));
+      
+      skillStats.byRole.forEach((role) => {
+        const successRate = role.success_rate >= 80 
+          ? chalk.green(`${role.success_rate}%`)
+          : role.success_rate >= 50 
+            ? chalk.yellow(`${role.success_rate}%`)
+            : chalk.red(`${role.success_rate}%`);
+        console.log(`   ${role.subagent_role.padEnd(15)} ${String(role.total_executions).padEnd(10)} ${String(role.avg_steps).padEnd(10)} ${String(role.avg_tool_calls).padEnd(10)} ${successRate.padEnd(10)}`);
+      });
+    }
+    
+    console.log();
+    console.log(chalk.gray('提示: 使用 /metrics <天数> 查看指定周期的统计'));
+    console.log(chalk.gray('─'.repeat(60)));
+    console.log();
+  }
+
   private completer(line: string): [string[], string] {
-    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools', '/tasks', '/clear', '/history', '/agents', '/team', '/analyze', '/m', '/multi'];
+    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools', '/tasks', '/clear', '/history', '/agents', '/team', '/analyze', '/m', '/multi', '/metrics'];
     const hits = completions.filter((c) => c.startsWith(line));
     return [hits.length ? hits : completions, line];
   }

@@ -4,7 +4,7 @@ import * as path from 'path';
 
 export const createGrepTool = (workingDir: string): ToolDefinition => ({
   name: 'grep',
-  description: '基于ripgrep的强大文件搜索工具。支持正则表达式搜索、多行匹配、文件过滤等功能。用于在代码库中查找特定模式。',
+  description: '类ripgrep风格的文件搜索工具。支持正则表达式搜索、多行匹配、文件过滤等功能。用于在代码库中查找特定模式。',
   parameters: [
     { name: 'pattern', type: 'string', description: '搜索的正则表达式模式', required: true },
     { name: 'path', type: 'string', description: '搜索路径（文件或目录），默认为当前工作目录', required: false, default: '.' },

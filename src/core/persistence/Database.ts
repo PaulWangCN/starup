@@ -46,6 +46,36 @@ export interface SystemState {
   updatedAt: number;
 }
 
+// ==================== 监控指标类型 ====================
+
+export interface ToolCallMetrics {
+  id: string;
+  tool_name: string;
+  session_id: string;
+  subagent_id?: string;
+  args_summary: string;
+  success: boolean;
+  error_type?: string;
+  error_message?: string;
+  duration_ms: number;
+  timestamp: number;
+}
+
+export interface SkillExecutionMetrics {
+  id: string;
+  skill_id: string;
+  session_id: string;
+  mission_id?: string;
+  subagent_role?: string;
+  steps_count: number;
+  tool_calls_count: number;
+  llm_calls_count: number;
+  duration_ms: number;
+  success: boolean;
+  completed: boolean;
+  timestamp: number;
+}
+
 export class StarUpDatabase {
   private db: Database.Database | null = null;
   private dbPath: string;
@@ -145,6 +175,48 @@ export class StarUpDatabase {
       );
       CREATE INDEX IF NOT EXISTS idx_kairos_time ON kairos_logs(timestamp);
       CREATE INDEX IF NOT EXISTS idx_kairos_level ON kairos_logs(level);
+    `);
+
+    // 工具调用监控表
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS tool_call_metrics (
+        id TEXT PRIMARY KEY,
+        tool_name TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        subagent_id TEXT,
+        args_summary TEXT,
+        success INTEGER NOT NULL DEFAULT 1,
+        error_type TEXT,
+        error_message TEXT,
+        duration_ms INTEGER NOT NULL,
+        timestamp INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_tool_name ON tool_call_metrics(tool_name);
+      CREATE INDEX IF NOT EXISTS idx_tool_session ON tool_call_metrics(session_id);
+      CREATE INDEX IF NOT EXISTS idx_tool_timestamp ON tool_call_metrics(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_tool_success ON tool_call_metrics(success);
+    `);
+
+    // Skill 执行监控表
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS skill_execution_metrics (
+        id TEXT PRIMARY KEY,
+        skill_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        mission_id TEXT,
+        subagent_role TEXT,
+        steps_count INTEGER NOT NULL DEFAULT 0,
+        tool_calls_count INTEGER NOT NULL DEFAULT 0,
+        llm_calls_count INTEGER NOT NULL DEFAULT 0,
+        duration_ms INTEGER NOT NULL,
+        success INTEGER NOT NULL DEFAULT 1,
+        completed INTEGER NOT NULL DEFAULT 1,
+        timestamp INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_skill_id ON skill_execution_metrics(skill_id);
+      CREATE INDEX IF NOT EXISTS idx_skill_session ON skill_execution_metrics(session_id);
+      CREATE INDEX IF NOT EXISTS idx_skill_timestamp ON skill_execution_metrics(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_skill_success ON skill_execution_metrics(success);
     `);
 
     logger.debug('Database', 'Tables created successfully');
@@ -479,7 +551,317 @@ export class StarUpDatabase {
     logger.debug('Database', `Cleaned up ${result.changes} old KAIROS logs`);
   }
 
+  // ==================== 工具调用监控 ====================
+
+  /**
+   * 记录工具调用指标
+   */
+  recordToolCallMetrics(metrics: Omit<ToolCallMetrics, 'id'>): string {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const id = `tool-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    const stmt = this.db.prepare(`
+      INSERT INTO tool_call_metrics 
+      (id, tool_name, session_id, subagent_id, args_summary, success, error_type, error_message, duration_ms, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      id,
+      metrics.tool_name,
+      metrics.session_id,
+      metrics.subagent_id || null,
+      metrics.args_summary || null,
+      metrics.success ? 1 : 0,
+      metrics.error_type || null,
+      metrics.error_message || null,
+      metrics.duration_ms,
+      metrics.timestamp
+    );
+
+    return id;
+  }
+
+  /**
+   * 获取工具调用统计
+   */
+  getToolCallStats(options: {
+    since?: number;
+    toolName?: string;
+    limit?: number;
+  } = {}): Array<{
+    tool_name: string;
+    total_calls: number;
+    success_count: number;
+    fail_count: number;
+    avg_duration_ms: number;
+    max_duration_ms: number;
+    min_duration_ms: number;
+  }> {
+    if (!this.db) return [];
+
+    let sql = `
+      SELECT 
+        tool_name,
+        COUNT(*) as total_calls,
+        SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as success_count,
+        SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as fail_count,
+        ROUND(AVG(duration_ms), 2) as avg_duration_ms,
+        MAX(duration_ms) as max_duration_ms,
+        MIN(duration_ms) as min_duration_ms
+      FROM tool_call_metrics
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+
+    if (options.since) {
+      sql += ' AND timestamp >= ?';
+      params.push(options.since);
+    }
+
+    if (options.toolName) {
+      sql += ' AND tool_name = ?';
+      params.push(options.toolName);
+    }
+
+    sql += ' GROUP BY tool_name ORDER BY total_calls DESC';
+
+    if (options.limit) {
+      sql += ' LIMIT ?';
+      params.push(options.limit);
+    }
+
+    const stmt = this.db.prepare(sql);
+    return stmt.all(...params) as any[];
+  }
+
+  /**
+   * 获取工具错误分析
+   */
+  getToolErrorAnalysis(options: {
+    since?: number;
+    toolName?: string;
+    limit?: number;
+  } = {}): Array<{
+    error_type: string;
+    error_count: number;
+    affected_tools: string;
+    sample_error: string;
+  }> {
+    if (!this.db) return [];
+
+    let sql = `
+      SELECT 
+        error_type,
+        COUNT(*) as error_count,
+        GROUP_CONCAT(DISTINCT tool_name) as affected_tools,
+        MAX(error_message) as sample_error
+      FROM tool_call_metrics
+      WHERE success = 0 AND error_type IS NOT NULL
+    `;
+    const params: any[] = [];
+
+    if (options.since) {
+      sql += ' AND timestamp >= ?';
+      params.push(options.since);
+    }
+
+    if (options.toolName) {
+      sql += ' AND tool_name = ?';
+      params.push(options.toolName);
+    }
+
+    sql += ' GROUP BY error_type ORDER BY error_count DESC';
+
+    if (options.limit) {
+      sql += ' LIMIT ?';
+      params.push(options.limit);
+    }
+
+    const stmt = this.db.prepare(sql);
+    return stmt.all(...params) as any[];
+  }
+
+  /**
+   * 获取最近失败的工具调用
+   */
+  getRecentFailedToolCalls(limit: number = 10): ToolCallMetrics[] {
+    if (!this.db) return [];
+
+    const stmt = this.db.prepare(`
+      SELECT * FROM tool_call_metrics 
+      WHERE success = 0 
+      ORDER BY timestamp DESC 
+      LIMIT ?
+    `);
+
+    const rows = stmt.all(limit) as any[];
+    return rows.map(row => this.mapToolMetricsRow(row));
+  }
+
+  // ==================== Skill 执行监控 ====================
+
+  /**
+   * 记录 Skill 执行指标
+   */
+  recordSkillExecutionMetrics(metrics: Omit<SkillExecutionMetrics, 'id'>): string {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const id = `skill-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    const stmt = this.db.prepare(`
+      INSERT INTO skill_execution_metrics 
+      (id, skill_id, session_id, mission_id, subagent_role, steps_count, tool_calls_count, 
+       llm_calls_count, duration_ms, success, completed, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      id,
+      metrics.skill_id,
+      metrics.session_id,
+      metrics.mission_id || null,
+      metrics.subagent_role || null,
+      metrics.steps_count,
+      metrics.tool_calls_count,
+      metrics.llm_calls_count,
+      metrics.duration_ms,
+      metrics.success ? 1 : 0,
+      metrics.completed ? 1 : 0,
+      metrics.timestamp
+    );
+
+    return id;
+  }
+
+  /**
+   * 获取 Skill 执行统计
+   */
+  getSkillExecutionStats(options: {
+    since?: number;
+    skillId?: string;
+    limit?: number;
+  } = {}): Array<{
+    skill_id: string;
+    total_executions: number;
+    success_count: number;
+    fail_count: number;
+    avg_steps: number;
+    avg_tool_calls: number;
+    avg_duration_ms: number;
+    completion_rate: number;
+  }> {
+    if (!this.db) return [];
+
+    let sql = `
+      SELECT 
+        skill_id,
+        COUNT(*) as total_executions,
+        SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as success_count,
+        SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as fail_count,
+        ROUND(AVG(steps_count), 2) as avg_steps,
+        ROUND(AVG(tool_calls_count), 2) as avg_tool_calls,
+        ROUND(AVG(duration_ms), 2) as avg_duration_ms,
+        ROUND(100.0 * SUM(CASE WHEN completed = 1 THEN 1 ELSE 0 END) / COUNT(*), 2) as completion_rate
+      FROM skill_execution_metrics
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+
+    if (options.since) {
+      sql += ' AND timestamp >= ?';
+      params.push(options.since);
+    }
+
+    if (options.skillId) {
+      sql += ' AND skill_id = ?';
+      params.push(options.skillId);
+    }
+
+    sql += ' GROUP BY skill_id ORDER BY total_executions DESC';
+
+    if (options.limit) {
+      sql += ' LIMIT ?';
+      params.push(options.limit);
+    }
+
+    const stmt = this.db.prepare(sql);
+    return stmt.all(...params) as any[];
+  }
+
+  /**
+   * 获取 Subagent 角色效率统计
+   */
+  getSubagentRoleStats(options: {
+    since?: number;
+  } = {}): Array<{
+    subagent_role: string;
+    total_executions: number;
+    avg_steps: number;
+    avg_tool_calls: number;
+    avg_duration_ms: number;
+    success_rate: number;
+  }> {
+    if (!this.db) return [];
+
+    let sql = `
+      SELECT 
+        COALESCE(subagent_role, 'unknown') as subagent_role,
+        COUNT(*) as total_executions,
+        ROUND(AVG(steps_count), 2) as avg_steps,
+        ROUND(AVG(tool_calls_count), 2) as avg_tool_calls,
+        ROUND(AVG(duration_ms), 2) as avg_duration_ms,
+        ROUND(100.0 * SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) / COUNT(*), 2) as success_rate
+      FROM skill_execution_metrics
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+
+    if (options.since) {
+      sql += ' AND timestamp >= ?';
+      params.push(options.since);
+    }
+
+    sql += ' GROUP BY subagent_role ORDER BY total_executions DESC';
+
+    const stmt = this.db.prepare(sql);
+    return stmt.all(...params) as any[];
+  }
+
+  /**
+   * 清理旧的监控数据
+   */
+  cleanupOldMetrics(olderThanDays: number = 30): void {
+    if (!this.db) return;
+
+    const cutoff = Date.now() - (olderThanDays * 24 * 60 * 60 * 1000);
+    
+    const toolStmt = this.db.prepare('DELETE FROM tool_call_metrics WHERE timestamp < ?');
+    const toolResult = toolStmt.run(cutoff);
+    
+    const skillStmt = this.db.prepare('DELETE FROM skill_execution_metrics WHERE timestamp < ?');
+    const skillResult = skillStmt.run(cutoff);
+    
+    logger.debug('Database', `Cleaned up ${toolResult.changes} tool metrics and ${skillResult.changes} skill metrics`);
+  }
+
   // ==================== 工具方法 ====================
+
+  private mapToolMetricsRow(row: any): ToolCallMetrics {
+    return {
+      id: row.id,
+      tool_name: row.tool_name,
+      session_id: row.session_id,
+      subagent_id: row.subagent_id,
+      args_summary: row.args_summary,
+      success: row.success === 1,
+      error_type: row.error_type,
+      error_message: row.error_message,
+      duration_ms: row.duration_ms,
+      timestamp: row.timestamp,
+    };
+  }
 
   private mapSessionRow(row: any): SessionRecord {
     return {

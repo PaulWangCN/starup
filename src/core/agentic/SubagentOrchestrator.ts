@@ -16,6 +16,7 @@ import { Session, ToolDefinition, ToolResult, LLMConfig, ConversationMessage } f
 import { LLMService } from '../llm/LLMService';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { ParallelToolExecutor, ToolExecutionGraph, ParallelToolCall } from '../tools/ParallelToolExecutor';
+import { metricService } from '../metrics/MetricService';
 
 /** Subagent角色类型 */
 export type SubagentRole = 
@@ -292,12 +293,23 @@ export class SubagentOrchestrator extends EventEmitter {
 
     this.emit('task_started', { subagent, task });
 
+    // 开始 Skill 执行监控
+    const mission = this.findMissionBySubagent(subagentId);
+    const metricId = metricService.startSkillExecution(
+      task.type, // 使用任务类型作为 skill ID
+      subagent.parentOrchestratorId, // 使用 mission ID 作为 session ID
+      {
+        missionId: mission?.id,
+        subagentRole: subagent.config.role,
+      }
+    );
+
     try {
       // 构建执行上下文
       const context = this.buildTaskContext(subagent, task);
       
       // 执行ReAct循环
-      const result = await this.executeReActLoop(subagent, task, context);
+      const result = await this.executeReActLoop(subagent, task, context, metricId);
       
       const endTime = Date.now();
       const taskResult: TaskResult = {
@@ -314,6 +326,9 @@ export class SubagentOrchestrator extends EventEmitter {
       subagent.status = 'completed';
       subagent.completedAt = endTime;
       subagent.currentTask = undefined;
+
+      // 结束 Skill 执行监控
+      metricService.endSkillExecution(metricId, result.success, true);
 
       this.emit('task_completed', { subagent, task, result: taskResult });
       
@@ -332,6 +347,9 @@ export class SubagentOrchestrator extends EventEmitter {
 
       subagent.status = 'error';
       subagent.currentTask = undefined;
+
+      // 结束 Skill 执行监控（失败）
+      metricService.endSkillExecution(metricId, false, false);
 
       this.emit('task_failed', { subagent, task, result: taskResult });
       
@@ -572,7 +590,8 @@ ${completedResults.map((r, i) => `
   private async executeReActLoop(
     subagent: Subagent,
     task: Task,
-    context: string
+    context: string,
+    metricId?: string
   ): Promise<{ success: boolean; output: any; error?: string; toolCalls?: ToolCallRecord[] }> {
     const toolCalls: ToolCallRecord[] = [];
     let iterations = 0;
@@ -621,7 +640,17 @@ ${completedResults.map((r, i) => `
             timestamp: Date.now()
           });
         }
+        
+        // 记录监控：一步（包含工具调用）
+        if (metricId) {
+          metricService.recordSkillStep(metricId, response.tool_calls.length, 1);
+        }
       } else {
+        // 任务完成 - 记录最后一步（只有 LLM 调用，没有工具调用）
+        if (metricId) {
+          metricService.recordSkillStep(metricId, 0, 1);
+        }
+        
         // 任务完成
         return {
           success: true,
@@ -638,6 +667,18 @@ ${completedResults.map((r, i) => `
       error: `Exceeded maximum iterations (${subagent.config.maxIterations})`,
       toolCalls
     };
+  }
+
+  /**
+   * 根据 subagent ID 查找 mission
+   */
+  private findMissionBySubagent(subagentId: string): CoordinationMission | undefined {
+    for (const mission of this.missions.values()) {
+      if (mission.subagents.has(subagentId)) {
+        return mission;
+      }
+    }
+    return undefined;
   }
 
   // ==================== 工具方法 ====================

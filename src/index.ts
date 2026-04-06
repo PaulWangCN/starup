@@ -12,6 +12,7 @@ setupGlobalErrorHandling();
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { logger } from './utils/Logger';
+import { starupDB } from './core/persistence/Database';
 import { SessionManager, sessionManager } from './core/session/SessionManager';
 import { MemoryManager, memoryManager } from './core/memory/MemoryManager';
 import { AutoDream, autoDream, AutoDreamPersistence, ConversationObserver } from './core/memory';
@@ -156,6 +157,9 @@ export class StarUpCore {
   async initialize(): Promise<void> {
     logger.info('StarUpCore', 'Initializing...');
     
+    // 初始化数据库
+    await starupDB.initialize();
+    
     // 校验环境变量
     this.validateConfig();
     
@@ -252,6 +256,12 @@ export class StarUpCore {
       });
       logger.info('StarUpCore', 'Self-healing system enabled');
     }
+    
+    // 定期清理旧监控数据（每天）
+    setInterval(() => {
+      starupDB.cleanupOldMetrics(30); // 保留 30 天
+      starupDB.cleanupOldLogs(7); // 保留 7 天日志
+    }, 24 * 60 * 60 * 1000);
     
     logger.info('StarUpCore', 'Initialization complete');
   }
@@ -732,6 +742,9 @@ export class StarUpCore {
   async shutdown(): Promise<void> {
     logger.info('StarUpCore', 'Shutting down...');
     
+    // 关闭数据库
+    starupDB.close();
+    
     // 停止 KAIROS 引擎
     await this.kairosEngine.stop();
     
@@ -951,6 +964,9 @@ export {
   AutoDreamPersistence,
   ConversationObserver
 } from './core/memory';
+
+// Metrics 监控系统
+export { MetricService, metricService, ErrorType } from './core/metrics/MetricService';
 
 // 版本信息
 export const VERSION = '2.0.0';

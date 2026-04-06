@@ -1,6 +1,7 @@
 import { ToolDefinition, ToolResult, Session, ScheduledTask, TaskExecutor } from '../../types';
 import * as path from 'path';
 import { logger } from '../../utils/Logger';
+import { metricService } from '../metrics/MetricService';
 import {
   listSkillsTool,
   fetchTool,
@@ -84,9 +85,29 @@ export class ToolRegistry {
     if (!session.allowedTools.includes(name)) {
       return { success: false, error: `Tool '${name}' not allowed in this session` };
     }
+    
+    // 开始监控
+    const metricId = metricService.startToolCall(
+      name, 
+      session.id, 
+      args, 
+      session.parentId // 如果是 subagent，parentId 就是 subagent ID
+    );
+    
     try {
-      return await tool.handler(args, session);
+      const result = await tool.handler(args, session);
+      
+      // 记录结果
+      if (result.success) {
+        metricService.endToolCallSuccess(metricId);
+      } else {
+        metricService.endToolCallFailure(metricId, result.error || 'Unknown error');
+      }
+      
+      return result;
     } catch (error) {
+      // 记录异常
+      metricService.endToolCallFailure(metricId, error instanceof Error ? error : String(error));
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
