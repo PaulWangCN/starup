@@ -18,6 +18,10 @@ export class TerminalChat {
   private mainSessionId: string | null = null;
   private promptAssembler: PromptAssembler;
   private notifications: string[] = [];
+  
+  // 多行输入支持
+  private multiLineBuffer: string[] = [];
+  private isMultiLineMode: boolean = false;
 
   constructor(core?: StarUpCore) {
     this.core = core || new StarUpCore();
@@ -81,21 +85,145 @@ export class TerminalChat {
     // 显示提示
     this.showPrompt();
 
-    // 处理输入
+    // 启用 keypress 事件以捕获组合键（如 Shift+Enter）
+    readline.emitKeypressEvents(process.stdin);
+    
+    // 启用 raw mode 以捕获组合键
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(true);
+    }
+
+    // 监听 keypress 事件以支持 Shift+Enter 换行
+    process.stdin.on('keypress', (str, key) => {
+      if (!key) return;
+      
+      // 在多行模式下，累积输入
+      if (this.isMultiLineMode) {
+        // Ctrl+J: 在当前位置继续添加新行（Ctrl+J 比 Shift+Enter 更可靠）
+        if (key.ctrl && key.name === 'j') {
+          // 将当前行添加到缓冲区
+          this.multiLineBuffer.push(this.rl?.line || '');
+          process.stdout.write('\n');
+          // 重置 readline 的当前行
+          if (this.rl) {
+            (this.rl as any).line = '';
+            (this.rl as any).cursor = 0;
+          }
+          return;
+        }
+        
+        // 普通 Enter: 提交多行输入
+        if (key.name === 'return' || key.name === 'enter') {
+          // 添加最后一行
+          this.multiLineBuffer.push(this.rl?.line || '');
+          const finalInput = this.multiLineBuffer.join('\n');
+          this.multiLineBuffer = [];
+          this.isMultiLineMode = false;
+          
+          process.stdout.write('\n');
+          
+          // 如果正在处理中，忽略新输入
+          if (this.isProcessing) {
+            this.renderer.system('AI 正在处理中，请稍候...');
+            return;
+          }
+          
+          // 处理输入
+          this.handleInputAsync(finalInput);
+          return;
+        }
+        
+        // Ctrl+C: 取消多行输入
+        if (key.ctrl && key.name === 'c') {
+          this.multiLineBuffer = [];
+          this.isMultiLineMode = false;
+          process.stdout.write('^C\n');
+          process.stdout.write(chalk.gray('[已取消多行输入]\n'));
+          if (this.rl) {
+            (this.rl as any).line = '';
+            (this.rl as any).cursor = 0;
+          }
+          this.showPrompt();
+          return;
+        }
+        
+        return; // 多行模式下，让其他键正常处理
+      }
+      
+      // 普通模式下（非多行）
+      
+      // Ctrl+J: 进入多行模式（Ctrl+J 比 Shift+Enter 更可靠）
+      if (key.ctrl && key.name === 'j') {
+        this.multiLineBuffer = [this.rl?.line || ''];
+        this.isMultiLineMode = true;
+        process.stdout.write('\n');
+        // 显示多行模式提示
+        process.stdout.write(chalk.gray('[多行模式 - Ctrl+J 换行, Enter 发送, Ctrl+C 取消]\n'));
+        // 重置 readline 当前行
+        if (this.rl) {
+          (this.rl as any).line = '';
+          (this.rl as any).cursor = 0;
+        }
+        return;
+      }
+      
+      // 普通 Enter: 正常提交（让 readline 处理）
+      // 不拦截，让 readline 触发 'line' 事件
+      
+      // Ctrl+C: 退出程序
+      if (key.ctrl && key.name === 'c') {
+        // 如果有输入内容，先清空
+        if (this.rl && this.rl.line.length > 0) {
+          if (this.rl) {
+            (this.rl as any).line = '';
+            (this.rl as any).cursor = 0;
+          }
+          process.stdout.write('\n');
+          this.showPrompt();
+          return;
+        }
+        this.stop();
+        return;
+      }
+    });
+
+    // 处理 readline line 事件（单行输入和粘贴的多行文本）
     this.rl.on('line', async (input) => {
       // 如果正在处理中，忽略新输入并提示用户
       if (this.isProcessing) {
         this.renderer.system('AI 正在处理中，请稍候...');
         return;
       }
-      try {
-        await this.handleInput(input);
-      } catch (error: any) {
-        this.renderer.error(`输入处理错误: ${error?.message || error}`);
+      
+      // 如果处于多行模式，不在这里处理（已经在 keypress 中处理）
+      if (this.isMultiLineMode) {
+        return;
       }
-      // 无论成功与否，都确保重新显示提示符
-      if (this.running && this.rl) {
-        this.showPrompt();
+      
+      // 检查是否是粘贴的多行文本（包含换行符）
+      if (input.includes('\n')) {
+        // 粘贴的多行文本，直接处理
+        try {
+          await this.handleInput(input);
+        } catch (error: any) {
+          this.renderer.error(`输入处理错误: ${error?.message || error}`);
+        }
+        if (this.running && this.rl) {
+          this.showPrompt();
+        }
+        return;
+      }
+      
+      // 普通单行输入
+      if (input.trim()) {
+        try {
+          await this.handleInput(input);
+        } catch (error: any) {
+          this.renderer.error(`输入处理错误: ${error?.message || error}`);
+        }
+        if (this.running && this.rl) {
+          this.showPrompt();
+        }
       }
     });
 
@@ -107,7 +235,7 @@ export class TerminalChat {
       }
     });
 
-    // 处理 Ctrl+C
+    // 处理 Ctrl+C (SIGINT)
     process.on('SIGINT', () => {
       this.stop();
     });
@@ -161,11 +289,35 @@ export class TerminalChat {
   stop(): void {
     this.stopSpinner();
     this.running = false;
+    
+    // 恢复终端 raw mode 状态
+    if (process.stdin.isTTY && process.stdin.isRaw) {
+      process.stdin.setRawMode(false);
+    }
+    
     if (this.rl) {
       this.rl.close();
     }
     this.renderer.showGoodbye();
     process.exit(0);
+  }
+
+  /**
+   * 异步处理输入（用于 keypress 事件）
+   */
+  private async handleInputAsync(input: string): Promise<void> {
+    try {
+      await this.handleInput(input);
+    } catch (error: any) {
+      this.renderer.error(`输入处理错误: ${error?.message || error}`);
+    }
+    // 重新启用 raw mode 并显示提示符
+    if (this.running && this.rl) {
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(true);
+      }
+      this.showPrompt();
+    }
   }
 
   /**
@@ -178,8 +330,8 @@ export class TerminalChat {
       return;
     }
 
-    // 检查是否是命令
-    if (trimmed.startsWith('/')) {
+    // 检查是否是命令（多行输入不支持命令）
+    if (trimmed.startsWith('/') && !trimmed.includes('\n')) {
       const shouldContinue = await this.handleCommand(trimmed);
       if (!shouldContinue) {
         this.stop();
@@ -188,7 +340,7 @@ export class TerminalChat {
     }
 
     // 处理消息
-    await this.processMessage(trimmed);
+    await this.processMessage(input);
   }
 
   /**
@@ -243,6 +395,11 @@ export class TerminalChat {
         } else {
           await this.analyzeTaskComplexity(args.join(' '));
         }
+        return true;
+
+      case 'm':
+      case 'multi':
+        await this.enterMultiLineMode();
         return true;
 
       default:
@@ -378,6 +535,62 @@ export class TerminalChat {
   }
 
   /**
+   * 进入多行输入模式（通过命令）
+   * 简单的异步循环实现，输入空行结束
+   */
+  private async enterMultiLineMode(): Promise<void> {
+    console.log();
+    console.log(chalk.cyan('进入多行输入模式'));
+    console.log(chalk.gray('  输入空行结束，Ctrl+C 取消'));
+    console.log(chalk.gray('  提示: 你也可以直接粘贴多行文本，无需进入此模式'));
+    console.log();
+    
+    const buffer: string[] = [];
+    
+    // 使用 question 逐行读取
+    const askLine = (): Promise<string | null> => {
+      return new Promise((resolve) => {
+        this.rl?.question(chalk.gray('... '), (answer) => {
+          resolve(answer);
+        });
+      });
+    };
+    
+    while (true) {
+      try {
+        const line = await askLine();
+        
+        // Ctrl+C 会导致 line 为 null 或 undefined
+        if (line === null || line === undefined) {
+          console.log(chalk.gray('[已取消多行输入]'));
+          break;
+        }
+        
+        // 空行表示结束
+        if (line.trim() === '') {
+          const finalInput = buffer.join('\n');
+          
+          if (finalInput.trim()) {
+            console.log(chalk.gray('[发送多行输入...]'));
+            await this.handleInput(finalInput);
+          } else {
+            console.log(chalk.gray('[已取消多行输入]'));
+          }
+          break;
+        }
+        
+        buffer.push(line);
+      } catch (e) {
+        console.log(chalk.gray('[已取消多行输入]'));
+        break;
+      }
+    }
+    
+    // 恢复提示符
+    this.showPrompt();
+  }
+
+  /**
    * 显示帮助
    */
   private showHelp(): void {
@@ -393,9 +606,16 @@ export class TerminalChat {
   /history [n]    显示最近 n 条对话历史 (默认 10)
   /agents, /team  显示 Agent Team 状态
   /analyze <任务> 分析任务复杂度
+  /m, /multi      进入多行输入模式
 
 直接输入消息与 AI 对话。
 复杂任务将自动组建 Agent Team 协作处理。
+
+输入技巧:
+  直接粘贴        支持粘贴多行文本
+  /m, /multi      进入多行输入模式（输入空行结束）
+  Ctrl+J          临时换行（部分终端支持）
+  Ctrl+C          取消当前输入 / 退出程序
 `);
   }
 
@@ -659,7 +879,7 @@ export class TerminalChat {
    * 自动补全
    */
   private completer(line: string): [string[], string] {
-    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools', '/tasks', '/clear', '/history', '/agents', '/team', '/analyze'];
+    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools', '/tasks', '/clear', '/history', '/agents', '/team', '/analyze', '/m', '/multi'];
     const hits = completions.filter((c) => c.startsWith(line));
     return [hits.length ? hits : completions, line];
   }

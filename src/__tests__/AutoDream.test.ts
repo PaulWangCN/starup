@@ -11,6 +11,7 @@
 import { AutoDream, AutoDreamPersistence } from '../core/memory';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as os from 'os';
 
 describe('AutoDream', () => {
   let autoDream: AutoDream;
@@ -266,7 +267,8 @@ describe('AutoDream', () => {
   });
 
   describe('持久化', () => {
-    const testDir = path.join(process.cwd(), '.test-autodream');
+    // 使用系统临时目录，避免在项目目录下生成测试文件
+    const testDir = path.join(os.tmpdir(), 'starup-test-autodream-' + Date.now());
     
     afterEach(async () => {
       // 清理测试目录

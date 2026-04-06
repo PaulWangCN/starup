@@ -51,7 +51,8 @@ temp/
 .starup/*.db
 .starup/*.db-shm
 .starup/*.db-wal
-.starup/memory/autodream/
+# Keep memory.json in git, but ignore backups
+.starup/memory/autodream/backups/
 
 # Skills index (auto-generated)
 .starup/skills_index.md

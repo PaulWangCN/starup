@@ -136,7 +136,10 @@ export class Renderer {
     console.log(chalk.bold('快捷键:'));
     console.log(`  ${chalk.gray('↑/↓')}       - 浏览命令历史`);
     console.log(`  ${chalk.gray('Tab')}       - 自动补全`);
-    console.log(`  ${chalk.gray('Ctrl+C')}    - 退出程序`);
+    console.log(`  ${chalk.gray('Shift+Enter')} - 换行（多行输入）`);
+    console.log(`  ${chalk.gray('Ctrl+J')}    - 换行（多行输入）`);
+    console.log(`  ${chalk.gray('Ctrl+C')}    - 取消输入 / 退出程序`);
+    console.log(`  ${chalk.gray('粘贴')}      - 支持直接粘贴多行文本`);
     console.log();
   }
 
