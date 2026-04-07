@@ -72,11 +72,10 @@ export class PromptAssembler {
 
   /**
    * 组装完整的七层Prompt
-   * L0: AGENTS.md - 工作区指南
+   * L0: AGENTS.md - 工作区指南（含记忆系统说明）
    * L1: SOUL.md - 灵魂/人格
    * L2: IDENTITY.md - 身份标识
    * L3: USER.md - 用户画像
-   * L3.5: MEMORY_GUIDANCE - 记忆系统使用规范
    * L4: TOOLS - 可用工具
    * L5: SKILLS - 技能能力
    * L6: RUNTIME_CONTEXT - 运行时上下文
@@ -91,7 +90,6 @@ export class PromptAssembler {
       this.loadLayer3(agentPath),
     ]);
 
-    const layer3_5 = this.generateMemoryGuidanceLayer();
     const layer4 = this.generateLayer4(this.toolRegistry.getAll());
     const layer5 = await this.loadLayer5();
     const layer6 = this.generateLayer6(runtimeContext);
@@ -101,7 +99,6 @@ export class PromptAssembler {
       { name: 'L1_SOUL', content: layer1, required: true },
       { name: 'L2_IDENTITY', content: layer2, required: true },
       { name: 'L3_USER_PROFILE', content: layer3, required: false },
-      { name: 'L3_5_MEMORY_GUIDANCE', content: layer3_5, required: true },
       { name: 'L4_TOOLS', content: layer4, required: true },
       { name: 'L5_SKILLS', content: layer5, required: true },
       { name: 'L6_RUNTIME', content: layer6, required: true },
@@ -116,7 +113,6 @@ export class PromptAssembler {
         L1_SOUL: !!layer1,
         L2_IDENTITY: !!layer2,
         L3_USER_PROFILE: !!layer3,
-        L3_5_MEMORY_GUIDANCE: !!layer3_5,
         L4_TOOLS: !!layer4,
         L5_SKILLS: !!layer5,
         L6_RUNTIME: !!layer6,
@@ -278,99 +274,6 @@ export class PromptAssembler {
     ].join('\n');
 
     return this.wrapLayer('RUNTIME_CONTEXT', content);
-  }
-
-  /**
-   * L3.5: 记忆系统使用规范
-   * 
-   * 注入记忆系统的使用指南，包括：
-   * 1. 记忆类型的定义
-   * 2. 什么应该保存/不保存
-   * 3. 使用记忆前的验证要求
-   * 4. 新鲜度警告的解读
-   */
-  private generateMemoryGuidanceLayer(): string {
-    const content = `
-# 记忆系统使用指南
-
-你有一个持久化文件式记忆系统，位于 \`./.starup/memory/\`。
-
-## 记忆类型
-
-| 类型 | 用途 | 保存时机 | 作用域 |
-|------|------|----------|--------|
-| user | 用户画像、偏好、背景 | 了解到用户身份信息时 | 始终私有 |
-| feedback | 用户对工作方式的指导 | 用户纠正或确认做法时 | 默认私有 |
-| project | 项目进展、目标、事件 | 了解到工作计划、截止日期时 | 偏向团队 |
-| reference | 外部系统指针 | 了解到 Linear/Grafana/Slack 等资源时 | 通常团队 |
-
-**feedback 和 project 类型必须包含：**
-- **Why：** 为什么这个信息重要
-- **How to apply：** 如何在实际工作中应用
-
-## 明确不保存的内容
-
-以下信息即使被要求也不应保存（可从其他来源推导）：
-
-1. **代码模式、架构、文件路径** —— 直接从代码读取
-2. **Git 历史、最近变更** —— 使用 git log/blame
-3. **调试方案或修复步骤** —— 修复应在代码中，commit message 有上下文
-4. **AGENTS.md/IDENTITY.md/SOUL.md 中已有的内容** —— 不重复
-5. **临时任务细节** —— 进行中的工作、当前对话上下文
-
-## 保存记忆的格式
-
-使用 YAML frontmatter 格式：
-
-\`\`\`markdown
----
-name: 用户偏好-简洁回复
-description: 用户不希望在每次回复末尾加总结
-type: feedback
----
-
-不要在回复末尾总结刚做了什么，用户能看到 diff。
-
-**Why：** 用户明确要求过"不要总结你刚做了什么"
-**How to apply：** 所有回复结束时，直接结束，不加回顾性总结。
-\`\`\`
-
-## 使用记忆前的验证要求
-
-**重要：记忆是 point-in-time 观察，不是实时状态。**
-
-在基于记忆内容行动前，必须验证：
-
-- 如果记忆提到一个文件路径 → **检查文件是否存在**
-- 如果记忆提到一个函数或标志 → **grep 搜索它**
-- 如果用户即将根据你的建议行动 → **先验证**
-
-**"记忆说 X 存在" ≠ "X 现在存在"**
-
-## 新鲜度警告的解读
-
-记忆可能附带新鲜度警告：
-
-> ⚠️ 此记忆来自 N 天前。记忆是 point-in-time 观察...
-
-- **今天/昨天** —— 高度可信，但仍建议验证关键信息
-- **N 天前** —— 需要验证，代码和文件可能已经变化
-- **缺失警告** —— 记忆可能来自当前会话，但仍需遵循验证原则
-
-## 搜索过去上下文
-
-如需搜索记忆：
-1. 读取 ./.starup/memory/MEMORY.md 查看索引
-2. 读取相关记忆文件
-3. 使用 grep 搜索特定内容
-4. 或在日记忆文件中查找时间线
-
----
-
-**核心原则：文件 > 心理笔记。如果你需要记住什么，就写到文件里。**
-`.trim();
-
-    return this.wrapLayer('MEMORY_GUIDANCE', content);
   }
 
   private combineLayers(layers: { name: string; content: string; required: boolean }[]): string {

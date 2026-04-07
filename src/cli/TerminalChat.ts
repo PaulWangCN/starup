@@ -975,8 +975,8 @@ export class TerminalChat {
         activeSessions: this.core.sessionManager.getStats().active,
         systemStatus: 'healthy',
         memoryUsage: {
-          used: process.memoryUsage().heapUsed / 1024 / 1024,
-          total: process.memoryUsage().heapTotal / 1024 / 1024,
+          used: process.memoryUsage().heapUsed,
+          total: process.memoryUsage().heapTotal,
         },
         requestId: Math.random().toString(36).substring(7),
       };
@@ -997,7 +997,7 @@ export class TerminalChat {
       console.log(chalk.gray('─'.repeat(70)));
       console.log(assembled.content);
       console.log(chalk.gray('─'.repeat(70)));
-      console.log(chalk.gray(`\n💡 提示: 此提示词包含 ${Object.values(assembled.layers).filter(Boolean).length} 层上下文`));
+      console.log(chalk.gray(`\n💡 提示: 此提示词包含 ${Object.values(assembled.layers).filter(Boolean).length} 层上下文（L0-L6）`));
       console.log();
     } catch (error) {
       this.renderer.error(`获取系统提示词失败: ${error}`);
