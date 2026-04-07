@@ -407,6 +407,11 @@ export class TerminalChat {
         this.showMetrics(args);
         return true;
 
+      case 'prompt':
+      case 'system':
+        await this.showSystemPrompt();
+        return true;
+
       default:
         this.renderer.error(`未知命令: ${cmd}`);
         return true;
@@ -613,6 +618,7 @@ export class TerminalChat {
   /analyze <任务> 分析任务复杂度
   /m, /multi      进入多行输入模式
   /metrics [days] 显示监控统计 (默认 7 天)
+  /prompt, /system 输出当前完整系统提示词
 
 直接输入消息与 AI 对话。
 复杂任务将自动组建 Agent Team 协作处理。
@@ -954,8 +960,52 @@ export class TerminalChat {
     console.log();
   }
 
+  /**
+   * 显示当前系统提示词（完整七层 Prompt）
+   */
+  private async showSystemPrompt(): Promise<void> {
+    console.log();
+    console.log(chalk.bold('📝 当前系统提示词（完整七层 Prompt）'));
+    console.log(chalk.gray('═'.repeat(70)));
+
+    try {
+      const runtimeContext: RuntimeContext = {
+        timestamp: Date.now(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        activeSessions: this.core.sessionManager.getStats().active,
+        systemStatus: 'healthy',
+        memoryUsage: {
+          used: process.memoryUsage().heapUsed / 1024 / 1024,
+          total: process.memoryUsage().heapTotal / 1024 / 1024,
+        },
+        requestId: Math.random().toString(36).substring(7),
+      };
+
+      const assembled = await this.promptAssembler.assemble('default', runtimeContext);
+
+      // 输出每层信息
+      console.log(chalk.cyan(`\n📦 Prompt 版本: ${assembled.version}`));
+      console.log(chalk.cyan(`📊 Token 估算: ~${assembled.tokenCount} tokens`));
+      console.log(chalk.cyan(`🔧 已启用层:`));
+      Object.entries(assembled.layers).forEach(([layer, enabled]) => {
+        const status = enabled ? chalk.green('✓') : chalk.gray('✗');
+        console.log(`   ${status} ${layer}`);
+      });
+
+      console.log(chalk.gray('\n' + '─'.repeat(70)));
+      console.log(chalk.yellow('📄 完整提示词内容：'));
+      console.log(chalk.gray('─'.repeat(70)));
+      console.log(assembled.content);
+      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray(`\n💡 提示: 此提示词包含 ${Object.values(assembled.layers).filter(Boolean).length} 层上下文`));
+      console.log();
+    } catch (error) {
+      this.renderer.error(`获取系统提示词失败: ${error}`);
+    }
+  }
+
   private completer(line: string): [string[], string] {
-    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools', '/tasks', '/clear', '/history', '/agents', '/team', '/analyze', '/m', '/multi', '/metrics'];
+    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools', '/tasks', '/clear', '/history', '/agents', '/team', '/analyze', '/m', '/multi', '/metrics', '/prompt', '/system'];
     const hits = completions.filter((c) => c.startsWith(line));
     return [hits.length ? hits : completions, line];
   }
