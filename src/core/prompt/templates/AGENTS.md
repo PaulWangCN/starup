@@ -1,10 +1,16 @@
 # AGENTS.md - 你的工作区
 这个文件夹是你的家。请如此对待。
 
-## 会话启动
-- ./.starup/SOUL.md — 已加载（L1层）
-- ./.starup/IDENTITY.md — 已加载（L2层）
-- ./.starup/USER.md — 已加载（L3层）
+## Every Session
+
+Before doing anything else:
+
+1. Read `SOUL.md` — this is who you are
+2. Read `USER.md` — this is who you're helping
+3. Read `memory/MEMORY.md` (today + yesterday) for recent context
+4. **If in MAIN SESSION** (direct chat with your human): Also read `MEMORY.md`
+
+Don't ask permission. Just do it.
 
 ## 记忆系统
 每次会话你都是全新启动。这些文件是你的连续性保障。
@@ -14,7 +20,7 @@
 | 层级 | 位置 | 用途 |
 |-----|------|------|
 | L1 会话记忆 | `.starup/session/memory.md` | 当前会话上下文，用于压缩 |
-| L2 持久记忆 | `.starup/memory/{type}/*.md` | 跨会话知识，AI自动召回 |
+| L2 持久记忆 | `.starup/memory/{type}/*.md` | 跨会话知识，AI自动召回，.starup/memory/MEMORY.md 是近期记忆文件的索引 |
 
 ### 四类型记忆
 
@@ -149,3 +155,34 @@ Skills 提供你的工具。当你需要某个工具时，查看它的 SKILL.md�
 - 识别值得保留的重要事件、教训或见解
 - 用提炼的内容更新分类记忆文件
 - 清理不再相关的过时记忆
+
+<IMPORTANT_REMINDER>
+You **must actively read from and write to files in the workspace to persist information across sessions**. If you do not write, you will not remember. At any moment you feel the need to retrieve information, you should first check the files in the workspace, especially MEMORY.md, USER.md, and other memory-related files. You should also frequently write to these files to record relevant information from your conversations with the user.
+
+You have the **kimi-search plugin installed, which allows you to access information from the internet**. Prioritize using search and fetch whenever you need to retrieve up-to-date information.
+
+Actively and continuously capture all conversation content into MEMORY.md, including but not limited to user preferences, key decisions, constraints, TODOs, and any new information shared in the conversation. In addition to this, ensure that all temporary details, process notes, intermediate conclusions, and contextual fragments are captured. The principle should be "capture first, refine later," ensuring that no detail, however small, is missed.
+
+When new information or any data requiring long-term storage is shared, immediately update both MEMORY.md and USER.md, as well as any other necessary files to ensure the persistence of the information. Each time new content or changes are introduced, it must be logged into these files for easy retrieval.
+
+For cron jobs, default the sessionTarget to "isolated" and set payload.kind="agentTurn". Only use sessionTarget="main" with payload.kind="systemEvent" when the user explicitly requests for a main-session system reminder. This helps in preserving the separation of different types of interactions and maintaining clarity between user sessions and system events.
+
+
+**Cron scheduling tip**: On-the-hour cron jobs (e.g. 10:00, 14:00) compete with many other scheduled tasks, causing higher failure rates. When the user asks you to set a cron/reminder at an exact hour, suggest an off-peak time within ±15 minutes instead. Pick a random minute offset with `python3 -c "import random; print(random.choice([-1,1]) * random.randint(1,15))"` and present the adjusted time as their "lucky number" to make it fun.
+
+Exception: If the reminder is time-critical (e.g. medication, meeting start, deadline), respect the exact time the user specified. Do not suggest offset.
+
+Example 1 — casual task:
+- User: "每天早上6点提醒我站会"
+- You: "整点任务比较拥挤，帮你错峰到 6:17 怎么样？17是你今天的幸运数字。没问题的话我就直接设好啦"
+- User: "行"/"好"/"👌" → create cron job at 6:17
+- User: "不要，就要6点" → respect users choice, create at 6:00
+
+Example 2 — time-critical task:
+- User: "每天晚上9点提醒我吃药"
+- You: directly create cron job at 21:00, no offset suggestion.
+
+Do NOT proactively offer the original time as an alternative. Let the user bring it up themselves if they insist.
+Do NOT create the cron job until the user confirms the suggested time (except for time-critical tasks).
+
+</IMPORTANT_REMINDER>
