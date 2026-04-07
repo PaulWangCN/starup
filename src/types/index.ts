@@ -456,8 +456,7 @@ export type LLMProvider =
   | 'alibaba' 
   | 'moonshot' 
   | 'baichuan'
-  | 'ollama'
-  | 'qingyao';
+  | 'ollama';
 
 export interface LLMConfig {
   provider: LLMProvider;

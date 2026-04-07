@@ -38,8 +38,6 @@ export class LLMService {
         return this.callOpenAI(messages, tools, options);
       case 'ollama':
         return this.callOllama(messages, tools, options);
-      case 'qingyao':
-        return this.callQingyao(messages, tools, options);
       default:
         throw new Error(`Unsupported provider: ${this.config.provider}`);
     }
@@ -62,8 +60,6 @@ export class LLMService {
         return this.callOpenAIStream(messages, tools, callbacks);
       case 'ollama':
         return this.callOllamaStream(messages, tools, callbacks);
-      case 'qingyao':
-        return this.callQingyaoStream(messages, tools, callbacks);
       default:
         throw new Error(`Unsupported provider: ${this.config.provider}`);
     }
@@ -189,53 +185,6 @@ export class LLMService {
     callbacks?: { onChunk?: (chunk: string) => void }
   ): Promise<{ content: string; tool_calls?: any[] }> {
     const url = this.config.baseUrl || 'https://api.openai.com/v1/chat/completions';
-    const payload = this.buildPayload(messages, tools);
-    payload.stream = true;
-
-    return this.parseSSEStream(url, payload, callbacks);
-  }
-
-  /**
-   * 调用清瑶智能 API（非流式）
-   */
-  private async callQingyao(
-    messages: ConversationMessage[],
-    tools?: any[],
-    options?: { maxTokens?: number }
-  ): Promise<{ content: string; tool_calls?: any[] }> {
-    const url = this.config.baseUrl || 'http://192.168.20.16:8002/v1/chat/completions';
-
-    const payload = this.buildPayload(messages, tools, options);
-
-    try {
-      const response = await axios.post(url, payload, {
-        headers: {
-          Authorization: `Bearer ${this.config.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      const choice = response.data.choices[0];
-      return {
-        content: choice.message.content || '',
-        tool_calls: choice.message.tool_calls,
-      };
-    } catch (error: any) {
-      const errorDetail = this.extractErrorDetail(error);
-      logger.error('LLMService', `Qingyao API error: ${errorDetail}`);
-      throw new Error(`Qingyao API error: ${errorDetail}`);
-    }
-  }
-
-  /**
-   * 调用清瑶智能 API（流式）
-   */
-  private async callQingyaoStream(
-    messages: ConversationMessage[],
-    tools?: any[],
-    callbacks?: { onChunk?: (chunk: string) => void }
-  ): Promise<{ content: string; tool_calls?: any[] }> {
-    const url = this.config.baseUrl || 'http://192.168.20.16:8002/v1/chat/completions';
     const payload = this.buildPayload(messages, tools);
     payload.stream = true;
 
