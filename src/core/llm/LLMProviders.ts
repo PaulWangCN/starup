@@ -89,7 +89,7 @@ export abstract class BaseLLMProvider {
 
 /**
  * OpenAI 兼容格式的提供商
- * 支持 OpenAI, DeepSeek, Moonshot, Baichuan 等
+ * 支持 OpenAI, DeepSeek, Moonshot, Baichuan, 清瑶智能 等
  */
 export class OpenAICompatibleProvider extends BaseLLMProvider {
   private baseUrl: string;
@@ -450,6 +450,7 @@ export function createLLMProvider(config: LLMConfig): BaseLLMProvider {
     case 'deepseek':
     case 'moonshot':
     case 'baichuan':
+    case 'qingyao':
       return new OpenAICompatibleProvider(config);
     case 'anthropic':
       return new AnthropicProvider(config);
@@ -476,6 +477,7 @@ export const SUPPORTED_MODELS: Record<LLMProvider, string[]> = {
   moonshot: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'],
   baichuan: ['Baichuan4', 'Baichuan3-Turbo', 'Baichuan3-Turbo-128k', 'Baichuan2-Turbo'],
   ollama: ['llama3.2', 'llama3.1', 'qwen2.5', 'deepseek-coder-v2', 'codellama'],
+  qingyao: ['qingqi-ins-27b'],
 };
 
 /**
