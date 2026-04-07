@@ -4,39 +4,6 @@
 
 import { ToolDefinition as Tool } from '../../../types';
 
-export const webFetchTool2: Tool = {
-  name: 'web_fetch2',
-  description: '获取网页或API内容（增强版）',
-  parameters: [
-    { name: 'url', type: 'string', description: '目标URL', required: true },
-    { name: 'method', type: 'string', description: 'HTTP方法: GET/POST/PUT/DELETE', required: false, default: 'GET' },
-    { name: 'headers', type: 'object', description: '请求头', required: false },
-    { name: 'body', type: 'string', description: '请求体', required: false },
-    { name: 'timeout', type: 'number', description: '超时时间(毫秒)', required: false, default: 30000 },
-  ],
-  handler: async (args: any) => {
-    try {
-      const startTime = Date.now();
-      const fetch = require('node-fetch');
-      const response = await fetch(args.url, {
-        method: args.method || 'GET',
-        headers: args.headers || {},
-        body: args.body,
-        timeout: args.timeout || 30000,
-      });
-      const body = await response.text();
-      return {
-        success: response.ok,
-        status: response.status,
-        body: body.length > 10000 ? body.substring(0, 10000) + '...' : body,
-        duration: Date.now() - startTime
-      };
-    } catch (error: any) {
-      return { success: false, error: error.message };
-    }
-  }
-};
-
 export const parseHtmlTool: Tool = {
   name: 'parse_html',
   description: '解析HTML提取信息',
@@ -114,7 +81,6 @@ export const checkUrlTool: Tool = {
 };
 
 export const webTools = [
-  webFetchTool2,
   parseHtmlTool,
   apiRequestTool,
   checkUrlTool,

@@ -102,7 +102,7 @@ AutoDream 定期整合
 - `analyze_dependencies` - 依赖分析
 
 #### Web / API (4 个)
-- `web_fetch` / `web_fetch2` - 网页抓取
+- `web_fetch` - 网页抓取（HTML 转文本/Markdown）
 - `api_request` - API 调用
 - `check_url` - URL 可访问性检查
 - `parse_html` - HTML 解析

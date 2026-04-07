@@ -81,8 +81,8 @@
 - run_tests
 - analyze_test_coverage
 
-### Web 工具 (4个)
-- web_fetch2
+### Web 工具 (3个)
+- web_fetch (from webFetch.ts)
 - parse_html
 - api_request
 - check_url
