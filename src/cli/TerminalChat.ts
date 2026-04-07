@@ -412,6 +412,10 @@ export class TerminalChat {
         await this.showSystemPrompt();
         return true;
 
+      case 'new':
+        await this.createNewSession();
+        return true;
+
       default:
         this.renderer.error(`未知命令: ${cmd}`);
         return true;
@@ -619,6 +623,7 @@ export class TerminalChat {
   /m, /multi      进入多行输入模式
   /metrics [days] 显示监控统计 (默认 7 天)
   /prompt, /system 输出当前完整系统提示词
+  /new            创建新会话(清空当前对话上下文)
 
 直接输入消息与 AI 对话。
 复杂任务将自动组建 Agent Team 协作处理。
@@ -1004,8 +1009,35 @@ export class TerminalChat {
     }
   }
 
+  /**
+   * 创建新会话
+   * 清空当前对话上下文，开启一个新的主会话
+   */
+  private async createNewSession(): Promise<void> {
+    console.log();
+    this.renderer.system('正在创建新会话...');
+    
+    // 清理旧会话（可选：保留或删除旧会话）
+    if (this.mainSessionId) {
+      // 可以在这里选择是否销毁旧会话，目前保留以便上下文恢复
+      this.core.sessionManager.destroySession(this.mainSessionId);
+    }
+    
+    // 生成新的系统提示词
+    const systemPrompt = await this.generateSystemPrompt();
+    this.core.setSystemPrompt(systemPrompt);
+    
+    // 初始化新的主会话
+    const newSession = this.core.sessionManager.initializeMainSession(systemPrompt);
+    this.mainSessionId = newSession.id;
+    
+    this.renderer.system(`新会话已创建: ${newSession.id.substring(0, 8)}...`);
+    this.renderer.system('对话上下文已清空，可以开始新的对话了');
+    console.log();
+  }
+
   private completer(line: string): [string[], string] {
-    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools', '/tasks', '/clear', '/history', '/agents', '/team', '/analyze', '/m', '/multi', '/metrics', '/prompt', '/system'];
+    const completions = ['/exit', '/quit', '/help', '/status', '/skills', '/tools', '/tasks', '/clear', '/history', '/agents', '/team', '/analyze', '/m', '/multi', '/metrics', '/prompt', '/system', '/new'];
     const hits = completions.filter((c) => c.startsWith(line));
     return [hits.length ? hits : completions, line];
   }
