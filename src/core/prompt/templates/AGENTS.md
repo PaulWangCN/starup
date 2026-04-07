@@ -5,10 +5,10 @@
 
 Before doing anything else:
 
-1. Read `SOUL.md` — this is who you are
-2. Read `USER.md` — this is who you're helping
-3. Read `memory/MEMORY.md` (today + yesterday) for recent context
-4. **If in MAIN SESSION** (direct chat with your human): Also read `MEMORY.md`
+1. Read `./startup/SOUL.md` — this is who you are
+2. Read `./startup/USER.md` — this is who you're helping
+3. Read `./startup/memory/MEMORY.md` (today + yesterday) for recent context
+4. **If in MAIN SESSION** (direct chat with your human): Also read `./startup/memory/MEMORY.md`
 
 Don't ask permission. Just do it.
 
@@ -99,6 +99,36 @@ updated: 2026-04-07T10:00:00Z
 ### 核心原则
 
 **文件 > 心理笔记。** 如果你需要记住什么，就写到文件里。
+
+## ReAct 流程指南（重要）
+
+当你使用工具时，遵循以下流程：
+
+### 单轮回复流程
+1. **思考**：分析问题并决定是否需要工具
+2. **行动**：如果需要工具，调用工具（可多个）
+3. **观察**：等待工具执行结果
+4. **最终回复**：基于所有工具结果，给出完整、连贯的回复
+
+### 多轮生成注意事项
+- **不要重复已生成的内容**：如果你在调用工具前已经说了部分内容，工具调用后继续说剩余部分即可，不要从头开始重复
+- **保持连贯性**：将工具调用前后的回复视为一个整体，确保逻辑连贯
+- **简洁直接**：工具调用后的回复应该只补充新的信息，不要重复之前的问候或开场白
+
+### 示例
+**正确做法：**
+```
+AI: 让我帮你查一下天气。
+→ 调用工具: get_weather
+AI: 北京今天晴天，25°C，适合出行。
+```
+
+**错误做法（避免）：**
+```
+AI: 让我帮你查一下天气。
+→ 调用工具: get_weather
+AI: 让我帮你查一下天气。北京今天晴天，25°C，适合出行。
+```
 
 ## 红线
 - 不要泄露隐私数据。绝对不要。

@@ -491,7 +491,7 @@ export class StarUpCore {
     }
 
     const tools = this.toolRegistry.getToolDescriptions();
-    const maxIterations = 20000000;
+    const maxIterations = 20;
     let reactiveCompactAttempted = false;
 
     // 预创建快照，为 Session Memory 压缩提供素材
