@@ -46,23 +46,17 @@ __pycache__/
 tmp/
 temp/
 
-# Session snapshots & runtime data
-.starup/snapshots/
-.starup/*.db
-.starup/*.db-shm
-.starup/*.db-wal
-# Keep memory.json in git, but ignore backups
-.starup/memory/autodream/backups/
-
-# Skills index (auto-generated)
-.starup/skills_index.md
-
+# ---------------------------------------------------------------------------
+# Agent runtime workspace — PRIVATE, never commit.
+# .starup/ holds session transcripts, personal memory, the runtime database,
+# persona files and internal task definitions. It is local state, not source.
+# Whole-directory ignore, so no new runtime file can slip in piecemeal.
+# ---------------------------------------------------------------------------
+.starup/
+.clawhub/
 
 # But keep example skill's dist
 !skills/**/dist/
-
-# log
-.starup/crash-logs/*
 
 # Secrets & environment files (NEVER commit real credentials)
 # .env.example is the tracked template; all real env files stay local.
