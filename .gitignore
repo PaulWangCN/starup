@@ -63,3 +63,13 @@ temp/
 
 # log
 .starup/crash-logs/*
+
+# Secrets & environment files (NEVER commit real credentials)
+# .env.example is the tracked template; all real env files stay local.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+service-account*.json
